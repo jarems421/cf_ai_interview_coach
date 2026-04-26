@@ -9,6 +9,20 @@ AI Interview Coach is a Cloudflare AI application for practicing interview answe
 - User input: React chat UI on Cloudflare Pages
 - Memory/state: Cloudflare D1 sessions, messages, and rolling coaching summaries
 
+## Why This Fits Cloudflare
+
+This project was designed specifically for the Cloudflare AI assignment. It uses Cloudflare Pages for the frontend, Workers for API coordination, Workers AI for LLM inference, and D1 for persistent session memory. I chose this architecture to learn how Cloudflare's developer platform can support full-stack AI applications without relying on external APIs.
+
+## Screenshots
+
+### Session Setup
+
+![Session setup screen](docs/screenshots/session-setup.png)
+
+### Dark Mode
+
+![Dark mode screen](docs/screenshots/dark-mode.png)
+
 ## App Flow
 
 1. Choose a target role, level, and interview focus.

@@ -38,6 +38,12 @@ const defaultSetup: SetupForm = {
 const themeStorageKey = "cf_ai_interview_coach_theme";
 
 function getInitialTheme() {
+  const requested = new URLSearchParams(window.location.search).get("theme");
+
+  if (requested === "dark" || requested === "light") {
+    return requested;
+  }
+
   const stored = localStorage.getItem(themeStorageKey);
 
   if (stored === "dark" || stored === "light") {

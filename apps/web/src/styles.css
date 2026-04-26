@@ -403,14 +403,22 @@ button {
 }
 
 .quickActions {
+  align-self: start;
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
+  align-content: flex-start;
   gap: 10px;
+  min-height: 52px;
+  max-height: 96px;
+  overflow: auto;
   padding: 0 32px 14px;
 }
 
 .quickActions button {
-  min-height: 38px;
+  flex: 0 0 auto;
+  height: 38px;
+  max-height: 38px;
   display: inline-flex;
   align-items: center;
   gap: 8px;

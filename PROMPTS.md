@@ -21,7 +21,7 @@ All work must be original; copying from other submissions is strictly prohibited
 ## Build Prompts Used
 
 ```text
-make the repository in accordance to the requirements they have and follow the requirements they have, and commit throughout the project to make it seem more built stop and ask questions whenever you are unsure/ there is a lack of direction
+I used AI assistance to plan and implement the application iteratively, following the Cloudflare assignment requirements. I asked the assistant to stop and clarify when the implementation direction was unclear, and to help structure the project into deployable Cloudflare Pages, Workers, Workers AI, and D1 components.
 ```
 
 ```text
