@@ -30,11 +30,19 @@ type ChatBody = {
   action?: unknown;
 };
 
-type ChatAction = "message" | "first_question" | "scorecard" | "improve_answer";
+type ChatAction =
+  | "message"
+  | "first_question"
+  | "next_question"
+  | "technical_question"
+  | "scorecard"
+  | "improve_answer";
 
 function getChatAction(value: unknown): ChatAction {
   if (
     value === "first_question" ||
+    value === "next_question" ||
+    value === "technical_question" ||
     value === "scorecard" ||
     value === "improve_answer"
   ) {
@@ -46,7 +54,15 @@ function getChatAction(value: unknown): ChatAction {
 
 function buildActionInstruction(action: ChatAction, message: string) {
   if (action === "first_question") {
-    return "Start or continue the mock interview by asking exactly one focused opening question for the candidate's target role and level. Do not score the candidate yet.";
+    return "Start the mock interview by asking exactly one focused opening question for the candidate's target role and level. Do not score the candidate yet.";
+  }
+
+  if (action === "next_question") {
+    return "Continue the mock interview like a real interviewer. Ask exactly one new follow-up or next-stage question based on the candidate's target role, level, focus area, and prior answers. Avoid repeating earlier questions.";
+  }
+
+  if (action === "technical_question") {
+    return "Ask exactly one practical technical interview question relevant to the candidate's target role and level. Make it answerable in chat, realistic for the role, and focused on tradeoffs, debugging, implementation, or system behavior. Do not ask for code unless the role clearly calls for it.";
   }
 
   if (action === "scorecard") {

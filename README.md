@@ -34,7 +34,7 @@ This project was designed specifically for the Cloudflare AI assignment. It uses
 
 - Persistent mock interview sessions per browser identity.
 - Context-aware coaching with recent chat history and rolling D1 memory.
-- Quick actions for starting an interview, generating a scorecard, and improving the last answer.
+- Quick actions for first/next questions, technical questions, scorecards, and improving the last answer.
 - Markdown export for a session transcript.
 - Local API tests with mocked D1 and mocked Workers AI.
 - Cost-conscious prompts that keep replies compact and update summary memory every few user turns.

@@ -11,6 +11,7 @@ import {
   Sun,
   WandSparkles,
   Target,
+  TerminalSquare,
   UserRound
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
@@ -155,7 +156,13 @@ export function App() {
 
   async function sendContent(
     content: string,
-    action: "message" | "first_question" | "scorecard" | "improve_answer"
+    action:
+      | "message"
+      | "first_question"
+      | "next_question"
+      | "technical_question"
+      | "scorecard"
+      | "improve_answer"
   ) {
     if ((!content && action === "message") || !activeSessionId || isSending) {
       return;
@@ -236,6 +243,10 @@ export function App() {
     link.click();
     URL.revokeObjectURL(url);
   }
+
+  const hasAssistantQuestion = messages.some(
+    (message) => message.role === "assistant"
+  );
 
   return (
     <main className="appShell">
@@ -414,12 +425,23 @@ export function App() {
           <button
             type="button"
             onClick={() =>
-              void sendContent("", "first_question")
+              void sendContent(
+                "",
+                hasAssistantQuestion ? "next_question" : "first_question"
+              )
             }
             disabled={!activeSession || isSending}
           >
             <MessageSquareText size={17} aria-hidden="true" />
-            First question
+            {hasAssistantQuestion ? "Next question" : "First question"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void sendContent("", "technical_question")}
+            disabled={!activeSession || isSending}
+          >
+            <TerminalSquare size={17} aria-hidden="true" />
+            Technical question
           </button>
           <button
             type="button"

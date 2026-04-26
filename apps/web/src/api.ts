@@ -55,7 +55,13 @@ export async function sendChatMessage(input: {
   clientId: string;
   sessionId: string;
   message: string;
-  action?: "message" | "first_question" | "scorecard" | "improve_answer";
+  action?:
+    | "message"
+    | "first_question"
+    | "next_question"
+    | "technical_question"
+    | "scorecard"
+    | "improve_answer";
 }) {
   const response = await fetch(`${API_BASE}/api/chat`, {
     method: "POST",

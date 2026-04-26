@@ -223,6 +223,26 @@ describe("worker", () => {
     expect(calls.some((call) => call.params.includes("assistant"))).toBe(true);
   });
 
+  it("supports technical question commands", async () => {
+    const { env, calls, aiCalls } = createChatEnv();
+    const response = await worker.fetch(
+      new Request("https://example.com/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          clientId: "browser-1",
+          sessionId: "session-1",
+          action: "technical_question"
+        })
+      }),
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(aiCalls).toHaveLength(1);
+    expect(calls.some((call) => call.params.includes("user"))).toBe(false);
+    expect(calls.some((call) => call.params.includes("assistant"))).toBe(true);
+  });
+
   it("does not score a session before the candidate answers", async () => {
     const { env, aiCalls } = createChatEnv([]);
     const response = await worker.fetch(
