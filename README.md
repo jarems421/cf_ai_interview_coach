@@ -23,6 +23,7 @@ AI Interview Coach is a Cloudflare AI application for practicing interview answe
 - Quick actions for starting an interview, generating a scorecard, and improving the last answer.
 - Markdown export for a session transcript.
 - Local API tests with mocked D1 and mocked Workers AI.
+- Cost-conscious prompts that keep replies compact and update summary memory every few user turns.
 
 ## Local Setup
 

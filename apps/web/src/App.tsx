@@ -396,7 +396,7 @@ export function App() {
             type="button"
             onClick={() =>
               void sendContent(
-                "Start this mock interview by asking me one focused question for my target role."
+                "Start a realistic mock interview. Ask one focused opening question for my target role and level, and make it slightly challenging."
               )
             }
             disabled={!activeSession || isSending}
@@ -408,7 +408,7 @@ export function App() {
             type="button"
             onClick={() =>
               void sendContent(
-                "Give me a concise scorecard for this session with strengths, improvement areas, and one drill to practice next."
+                "Give me a concise interviewer scorecard for this session: overall readiness, strongest signal, biggest risk, and one drill to practice next."
               )
             }
             disabled={!activeSession || isSending || messages.length === 0}
@@ -420,7 +420,7 @@ export function App() {
             type="button"
             onClick={() =>
               void sendContent(
-                `Rewrite my previous answer using the STAR format and explain the strongest change. Previous answer: ${lastUserMessage?.content ?? ""}`
+                `Rewrite my previous answer into a stronger interview answer using STAR format. Keep it natural, add measurable impact where possible, and explain the single strongest change. Previous answer: ${lastUserMessage?.content ?? ""}`
               )
             }
             disabled={!activeSession || isSending || !lastUserMessage}

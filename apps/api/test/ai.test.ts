@@ -14,13 +14,15 @@ describe("ai helpers", () => {
     ).toBe("Try adding metrics.");
   });
 
-  it("updates summaries every three user turns", () => {
+  it("updates summaries every four user turns", () => {
     const messages = [
       { role: "user", content: "a" },
       { role: "assistant", content: "b" },
       { role: "user", content: "c" },
       { role: "assistant", content: "d" },
-      { role: "user", content: "e" }
+      { role: "user", content: "e" },
+      { role: "assistant", content: "f" },
+      { role: "user", content: "g" }
     ].map(
       (message, index) =>
         ({
@@ -34,4 +36,3 @@ describe("ai helpers", () => {
     expect(shouldUpdateSummary(messages)).toBe(true);
   });
 });
-

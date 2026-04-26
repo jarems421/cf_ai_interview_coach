@@ -63,8 +63,8 @@ export async function generateCoachReply(input: {
 
   const result = await input.ai.run(MODEL, {
     messages,
-    max_tokens: 650,
-    temperature: 0.45
+    max_tokens: 430,
+    temperature: 0.38
   });
 
   const reply = extractAiText(result);
@@ -97,7 +97,7 @@ export async function generateUpdatedSummary(input: {
         content: `${input.current ? `Current memory:\n${JSON.stringify(input.current)}\n\n` : ""}${buildSummaryPrompt(transcript)}`
       }
     ],
-    max_tokens: 350,
+    max_tokens: 220,
     temperature: 0.2,
     response_format: { type: "json_object" }
   });
@@ -119,6 +119,5 @@ export async function generateUpdatedSummary(input: {
 
 export function shouldUpdateSummary(messages: Message[]) {
   const userTurns = messages.filter((message) => message.role === "user").length;
-  return userTurns > 0 && userTurns % 3 === 0;
+  return userTurns > 0 && userTurns % 4 === 0;
 }
-
