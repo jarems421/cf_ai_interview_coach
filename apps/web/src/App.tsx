@@ -4,9 +4,11 @@ import {
   ClipboardCheck,
   Download,
   Loader2,
+  Moon,
   MessageSquareText,
   Plus,
   Send,
+  Sun,
   WandSparkles,
   Target,
   UserRound
@@ -33,8 +35,23 @@ const defaultSetup: SetupForm = {
   focus: "Behavioral and technical communication"
 };
 
+const themeStorageKey = "cf_ai_interview_coach_theme";
+
+function getInitialTheme() {
+  const stored = localStorage.getItem(themeStorageKey);
+
+  if (stored === "dark" || stored === "light") {
+    return stored;
+  }
+
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+}
+
 export function App() {
   const [clientId] = useState(getClientId);
+  const [theme, setTheme] = useState<"dark" | "light">(getInitialTheme);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -59,6 +76,11 @@ export function App() {
   useEffect(() => {
     void refreshSessions();
   }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem(themeStorageKey, theme);
+  }, [theme]);
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({
@@ -208,6 +230,21 @@ export function App() {
             <h1>Interview Coach</h1>
           </div>
         </div>
+
+        <button
+          className="themeToggle"
+          type="button"
+          onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+          aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+          title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+        >
+          {theme === "dark" ? (
+            <Sun size={18} aria-hidden="true" />
+          ) : (
+            <Moon size={18} aria-hidden="true" />
+          )}
+          <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>
+        </button>
 
         <form className="setupPanel" onSubmit={handleCreateSession}>
           <label>
