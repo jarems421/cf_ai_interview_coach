@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronUp,
   ClipboardCheck,
+  Clock,
   Download,
   FileText,
   Loader2,
@@ -141,8 +142,11 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+  const [responseTimerSeconds, setResponseTimerSeconds] = useState(0);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerStartedRef = useRef(false);
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? null,
@@ -156,6 +160,19 @@ export function App() {
   const hasTailoring = Boolean(
     activeSession?.cvText || activeSession?.jobDescription
   );
+
+  function formatTimer(seconds: number) {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+
+  const timerClass =
+    responseTimerSeconds >= 180
+      ? "responseTimer danger"
+      : responseTimerSeconds >= 120
+      ? "responseTimer warn"
+      : "responseTimer";
 
   useEffect(() => {
     void refreshSessions();
@@ -172,6 +189,33 @@ export function App() {
       behavior: "smooth"
     });
   }, [messages, isSending]);
+
+  useEffect(() => {
+    const hasDraft = draft.trim().length > 0;
+
+    if (hasDraft && !timerStartedRef.current) {
+      timerStartedRef.current = true;
+      setResponseTimerSeconds(0);
+      timerIntervalRef.current = setInterval(() => {
+        setResponseTimerSeconds((s) => s + 1);
+      }, 1000);
+    }
+
+    if (!hasDraft && timerStartedRef.current) {
+      timerStartedRef.current = false;
+      if (timerIntervalRef.current !== null) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
+      setResponseTimerSeconds(0);
+    }
+
+    return () => {
+      if (timerIntervalRef.current !== null && !hasDraft) {
+        clearInterval(timerIntervalRef.current);
+      }
+    };
+  }, [draft]);
 
   async function refreshSessions(nextActiveId?: string) {
     setIsLoadingSessions(true);
@@ -791,6 +835,12 @@ export function App() {
         </div>
 
         <form className="composer" onSubmit={handleSend}>
+          {responseTimerSeconds > 0 && (
+            <div className={timerClass} aria-label="Response timer" aria-live="off">
+              <Clock size={13} aria-hidden="true" />
+              {formatTimer(responseTimerSeconds)}
+            </div>
+          )}
           <textarea
             value={draft}
             onChange={(event) => setDraft(event.target.value)}

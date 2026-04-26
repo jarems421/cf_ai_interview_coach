@@ -61,9 +61,15 @@
   --input-line: #40504b;
 }
 
-* {
-  box-sizing: border-box;
+[data-theme="dark"] .responseTimer.warn {
+  color: #e8a93a;
 }
+
+[data-theme="dark"] .responseTimer.danger {
+  color: #e06b4f;
+}
+
+
 
 body {
   margin: 0;
@@ -548,6 +554,29 @@ button {
 .voiceButton:disabled {
   cursor: not-allowed;
   opacity: 0.52;
+}
+
+.responseTimer {
+  position: absolute;
+  bottom: 19px;
+  left: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  pointer-events: none;
+  user-select: none;
+}
+
+.responseTimer.warn {
+  color: #b06d00;
+}
+
+.responseTimer.danger {
+  color: #c0311a;
 }
 
 @keyframes pulse {
