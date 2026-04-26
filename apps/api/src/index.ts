@@ -10,15 +10,17 @@ import {
 } from "./db";
 import {
   generateCoachReply,
+  generateRubric,
   generateUpdatedSummary,
   shouldUpdateSummary
 } from "./ai";
 import { HttpError, json, noContent, readJson, requireString } from "./http";
 import {
   buildFirstQuestionInstruction,
-  buildNextQuestionInstruction
+  buildNextQuestionInstruction,
+  formatRubricAsText
 } from "./prompts";
-import type { Env, InterviewMode } from "./types";
+import type { Env, InterviewMode, RubricResult } from "./types";
 
 type CreateSessionBody = {
   clientId?: unknown;
@@ -44,7 +46,8 @@ type ChatAction =
   | "next_question"
   | "technical_question"
   | "scorecard"
-  | "improve_answer";
+  | "improve_answer"
+  | "rubric";
 
 const VALID_INTERVIEW_MODES: InterviewMode[] = [
   "behavioural",
@@ -68,7 +71,8 @@ function getChatAction(value: unknown): ChatAction {
     value === "next_question" ||
     value === "technical_question" ||
     value === "scorecard" ||
-    value === "improve_answer"
+    value === "improve_answer" ||
+    value === "rubric"
   ) {
     return value;
   }
@@ -196,11 +200,42 @@ export default {
           (recentMessage) => recentMessage.role === "user"
         );
 
-        if ((action === "scorecard" || action === "improve_answer") && !hasCandidateAnswer) {
+        if (
+          (action === "scorecard" || action === "improve_answer" || action === "rubric") &&
+          !hasCandidateAnswer
+        ) {
           return json({
             reply:
               "I need at least one candidate answer before I can do that. Answer the current interview question first, then I can score or improve it."
           });
+        }
+
+        // Rubric action: generate structured score then store formatted text
+        if (action === "rubric") {
+          const lastUserMsg = [...recentMessages]
+            .reverse()
+            .find((m) => m.role === "user");
+          const lastAssistantMsg = [...recentMessages]
+            .reverse()
+            .find((m) => m.role === "assistant");
+
+          let rubric: RubricResult;
+          try {
+            rubric = await generateRubric({
+              ai: env.AI,
+              answer: lastUserMsg?.content ?? "",
+              question: lastAssistantMsg?.content ?? ""
+            });
+          } catch {
+            return json({
+              reply:
+                "I wasn't able to generate a rubric score right now. Please try again."
+            });
+          }
+
+          const reply = formatRubricAsText(rubric);
+          await addMessage(env.DB, sessionId, "assistant", reply);
+          return json({ reply, rubric });
         }
 
         const reply = await generateCoachReply({

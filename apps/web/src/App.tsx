@@ -16,6 +16,7 @@ import {
   WandSparkles,
   Target,
   TerminalSquare,
+  BarChart2,
   UserRound
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
@@ -26,7 +27,7 @@ import {
   listSessions,
   sendChatMessage
 } from "./api";
-import type { InterviewMode, Message, Session } from "./types";
+import type { InterviewMode, Message, RubricResult, Session } from "./types";
 
 type SetupForm = {
   role: string;
@@ -61,6 +62,79 @@ const defaultSetup: SetupForm = {
   jobDescription: ""
 };
 
+// A local-only extension of Message that carries the live rubric payload
+// (only present when just generated; not persisted or reloaded from DB)
+type LocalMessage = Message & { rubric?: RubricResult };
+
+const SCORE_LABELS: [keyof RubricResult["scores"], string][] = [
+  ["relevance", "Relevance"],
+  ["specificity", "Specificity"],
+  ["technicalDepth", "Technical depth"],
+  ["communicationClarity", "Communication"],
+  ["evidenceExamples", "Evidence/examples"]
+];
+
+function scoreColor(n: number): string {
+  if (n >= 8) return "var(--score-high)";
+  if (n >= 6) return "var(--score-mid)";
+  return "var(--score-low)";
+}
+
+function RubricCard({ rubric }: { rubric: RubricResult }) {
+  return (
+    <div className="rubricCard">
+      <p className="rubricTitle">📊 Rubric Score</p>
+      <table className="rubricTable">
+        <tbody>
+          {SCORE_LABELS.map(([key, label]) => (
+            <tr key={key}>
+              <td>{label}</td>
+              <td>
+                <span
+                  className="rubricBar"
+                  style={{ "--pct": `${rubric.scores[key] * 10}%` } as React.CSSProperties}
+                />
+              </td>
+              <td
+                className="rubricScore"
+                style={{ color: scoreColor(rubric.scores[key]) }}
+              >
+                {rubric.scores[key]}/10
+              </td>
+            </tr>
+          ))}
+          <tr className="rubricOverallRow">
+            <td>Overall</td>
+            <td />
+            <td
+              className="rubricScore"
+              style={{ color: scoreColor(rubric.scores.overall) }}
+            >
+              {rubric.scores.overall}/10
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div className="rubricSection">
+        <p className="rubricSectionTitle">✅ What was strong</p>
+        <p>{rubric.strengths}</p>
+      </div>
+      <div className="rubricSection">
+        <p className="rubricSectionTitle">⚠️ What to improve</p>
+        <p>{rubric.weaknesses}</p>
+      </div>
+      <div className="rubricSection">
+        <p className="rubricSectionTitle">📝 Stronger answer</p>
+        <p className="rubricImproved">{rubric.improvedAnswer}</p>
+      </div>
+      <div className="rubricSection">
+        <p className="rubricSectionTitle">❓ Likely follow-up</p>
+        <p className="rubricFollowUp">{rubric.followUpQuestion}</p>
+      </div>
+    </div>
+  );
+}
+
 const themeStorageKey = "cf_ai_interview_coach_theme";
 
 function getInitialTheme() {
@@ -86,7 +160,7 @@ export function App() {
   const [theme, setTheme] = useState<"dark" | "light">(getInitialTheme);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [setup, setSetup] = useState(defaultSetup);
   const [showContext, setShowContext] = useState(false);
   const [draft, setDraft] = useState("");
@@ -189,12 +263,13 @@ export function App() {
       | "technical_question"
       | "scorecard"
       | "improve_answer"
+      | "rubric"
   ) {
     if ((!content && action === "message") || !activeSessionId || isSending) {
       return;
     }
 
-    if (action === "scorecard" || action === "improve_answer") {
+    if (action === "scorecard" || action === "improve_answer" || action === "rubric") {
       if (!lastUserMessage) {
         setError("Answer at least one interview question before using that action.");
         return;
@@ -202,7 +277,7 @@ export function App() {
     }
 
     if (action === "message") {
-      const optimisticMessage: Message = {
+      const optimisticMessage: LocalMessage = {
         id: Date.now() * -1,
         sessionId: activeSessionId,
         role: "user",
@@ -224,16 +299,16 @@ export function App() {
         action
       });
 
-      setMessages((current) => [
-        ...current,
-        {
-          id: Date.now(),
-          sessionId: activeSessionId,
-          role: "assistant",
-          content: result.reply,
-          createdAt: new Date().toISOString()
-        }
-      ]);
+      const newMessage: LocalMessage = {
+        id: Date.now(),
+        sessionId: activeSessionId,
+        role: "assistant",
+        content: result.reply,
+        createdAt: new Date().toISOString(),
+        rubric: result.rubric
+      };
+
+      setMessages((current) => [...current, newMessage]);
       void refreshSessions(activeSessionId);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not send message.");
@@ -537,7 +612,11 @@ export function App() {
                     <UserRound size={18} aria-hidden="true" />
                   )}
                 </div>
-                <p>{message.content}</p>
+                {message.rubric ? (
+                  <RubricCard rubric={message.rubric} />
+                ) : (
+                  <p>{message.content}</p>
+                )}
               </article>
             ))
           )}
@@ -573,6 +652,16 @@ export function App() {
           >
             <TerminalSquare size={17} aria-hidden="true" />
             Technical question
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              void sendContent("", "rubric")
+            }
+            disabled={!activeSession || isSending || !lastUserMessage}
+          >
+            <BarChart2 size={17} aria-hidden="true" />
+            Rubric score
           </button>
           <button
             type="button"

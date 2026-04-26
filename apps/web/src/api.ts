@@ -1,4 +1,4 @@
-import type { Message, Session } from "./types";
+import type { Message, RubricResult, Session } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -65,7 +65,8 @@ export async function sendChatMessage(input: {
     | "next_question"
     | "technical_question"
     | "scorecard"
-    | "improve_answer";
+    | "improve_answer"
+    | "rubric";
 }) {
   const response = await fetch(`${API_BASE}/api/chat`, {
     method: "POST",
@@ -73,5 +74,5 @@ export async function sendChatMessage(input: {
     body: JSON.stringify(input)
   });
 
-  return parseResponse<{ reply: string }>(response);
+  return parseResponse<{ reply: string; rubric?: RubricResult }>(response);
 }

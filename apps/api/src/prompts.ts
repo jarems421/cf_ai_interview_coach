@@ -114,7 +114,86 @@ export function buildNextQuestionInstruction(
   }
 }
 
-export function buildSummaryPrompt(transcript: string) {
+export function buildRubricPrompt(answer: string, question: string) {
+  return `You are evaluating a candidate's interview answer. Return valid JSON only.
+
+Score the answer on five criteria (each 1–10):
+- relevance: How well the answer addresses the question asked
+- specificity: How concrete and specific the details are
+- technicalDepth: How well it demonstrates technical or domain knowledge (use 5 if not applicable)
+- communicationClarity: How clear, structured, and articulate the delivery is
+- evidenceExamples: How well it uses real examples, metrics, or evidence
+
+Also provide:
+- overall: weighted average rounded to one decimal
+- strengths: one concise sentence on what was strongest
+- weaknesses: one concise sentence on the most impactful gap
+- improvedAnswer: a rewritten version using STAR format, adding metrics/specificity, under 120 words
+- followUpQuestion: one realistic follow-up question an interviewer would ask next
+
+Return this exact JSON shape and nothing else:
+{
+  "scores": {
+    "relevance": 0,
+    "specificity": 0,
+    "technicalDepth": 0,
+    "communicationClarity": 0,
+    "evidenceExamples": 0,
+    "overall": 0.0
+  },
+  "strengths": "",
+  "weaknesses": "",
+  "improvedAnswer": "",
+  "followUpQuestion": ""
+}
+
+Interview question: ${question}
+
+Candidate answer: ${answer}`;
+}
+
+export function formatRubricAsText(rubric: {
+  scores: {
+    relevance: number;
+    specificity: number;
+    technicalDepth: number;
+    communicationClarity: number;
+    evidenceExamples: number;
+    overall: number;
+  };
+  strengths: string;
+  weaknesses: string;
+  improvedAnswer: string;
+  followUpQuestion: string;
+}): string {
+  const { scores, strengths, weaknesses, improvedAnswer, followUpQuestion } = rubric;
+
+  const pad = (label: string) => label.padEnd(24, " ");
+
+  return [
+    "📊 Rubric Score",
+    "",
+    `${pad("Relevance")}${scores.relevance}/10`,
+    `${pad("Specificity")}${scores.specificity}/10`,
+    `${pad("Technical depth")}${scores.technicalDepth}/10`,
+    `${pad("Communication")}${scores.communicationClarity}/10`,
+    `${pad("Evidence/examples")}${scores.evidenceExamples}/10`,
+    "─".repeat(34),
+    `${pad("Overall")}${scores.overall}/10`,
+    "",
+    "✅ What was strong",
+    strengths,
+    "",
+    "⚠️ What to improve",
+    weaknesses,
+    "",
+    "📝 Stronger answer",
+    improvedAnswer,
+    "",
+    "❓ Likely follow-up",
+    followUpQuestion
+  ].join("\n");
+}
   return `Update the coaching memory for this mock interview.
 
 Return only valid JSON with these string fields:

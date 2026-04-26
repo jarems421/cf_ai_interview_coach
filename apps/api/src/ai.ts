@@ -1,5 +1,5 @@
-import { buildSessionContext, buildSummaryPrompt, COACH_SYSTEM_PROMPT } from "./prompts";
-import type { InterviewMode, Message, Session, SessionSummary } from "./types";
+import { buildRubricPrompt, buildSessionContext, buildSummaryPrompt, COACH_SYSTEM_PROMPT } from "./prompts";
+import type { InterviewMode, Message, RubricResult, Session, SessionSummary } from "./types";
 
 const MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
@@ -84,7 +84,80 @@ export async function generateCoachReply(input: {
   return reply;
 }
 
-export async function generateUpdatedSummary(input: {
+export async function generateRubric(input: {
+  ai: Ai;
+  answer: string;
+  question: string;
+}): Promise<RubricResult> {
+  const result = await input.ai.run(MODEL, {
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are an expert interview evaluator. Output valid JSON only. Do not include any text outside the JSON object."
+      },
+      {
+        role: "user",
+        content: buildRubricPrompt(input.answer, input.question)
+      }
+    ],
+    max_tokens: 520,
+    temperature: 0.2,
+    response_format: { type: "json_object" }
+  });
+
+  const text = extractAiText(result);
+  const parsed = JSON.parse(text) as Partial<{
+    scores: Partial<{
+      relevance: unknown;
+      specificity: unknown;
+      technicalDepth: unknown;
+      communicationClarity: unknown;
+      evidenceExamples: unknown;
+      overall: unknown;
+    }>;
+    strengths: unknown;
+    weaknesses: unknown;
+    improvedAnswer: unknown;
+    followUpQuestion: unknown;
+  }>;
+
+  function clampScore(v: unknown, fallback: number): number {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.min(10, Math.max(0, Math.round(n * 10) / 10)) : fallback;
+  }
+
+  const relevance = clampScore(parsed.scores?.relevance, 5);
+  const specificity = clampScore(parsed.scores?.specificity, 5);
+  const technicalDepth = clampScore(parsed.scores?.technicalDepth, 5);
+  const communicationClarity = clampScore(parsed.scores?.communicationClarity, 5);
+  const evidenceExamples = clampScore(parsed.scores?.evidenceExamples, 5);
+
+  const computedOverall =
+    Math.round(
+      ((relevance + specificity + technicalDepth + communicationClarity + evidenceExamples) / 5) * 10
+    ) / 10;
+
+  const overall = clampScore(parsed.scores?.overall, computedOverall);
+
+  return {
+    scores: {
+      relevance,
+      specificity,
+      technicalDepth,
+      communicationClarity,
+      evidenceExamples,
+      overall
+    },
+    strengths: typeof parsed.strengths === "string" ? parsed.strengths : "",
+    weaknesses: typeof parsed.weaknesses === "string" ? parsed.weaknesses : "",
+    improvedAnswer: typeof parsed.improvedAnswer === "string" ? parsed.improvedAnswer : "",
+    followUpQuestion:
+      typeof parsed.followUpQuestion === "string" ? parsed.followUpQuestion : ""
+  };
+}
+
+
   ai: Ai;
   current?: SessionSummary | null;
   messages: Message[];

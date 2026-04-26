@@ -23,6 +23,11 @@
   --line: #d9e1dc;
   --line-soft: #dce4df;
   --input-line: #cfd8d3;
+  --score-high: #1a7a4c;
+  --score-mid: #8a6a00;
+  --score-low: #c0392b;
+  --rubric-bar-bg: #e2ebe7;
+  --rubric-bar-fill: #1f6f8b;
   color: var(--text);
   background: var(--surface);
   font-family:
