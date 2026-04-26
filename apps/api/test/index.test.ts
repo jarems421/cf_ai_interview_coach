@@ -64,6 +64,10 @@ function createChatEnv(
     role: "Frontend Engineer",
     level: "Senior",
     focus: "Behavioral",
+    companyName: "",
+    cvText: "",
+    jobDescription: "",
+    interviewMode: "behavioural",
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString()
   };
@@ -176,7 +180,11 @@ describe("worker", () => {
       "browser-1",
       "Frontend Engineer",
       "Senior",
-      "behavioral"
+      "behavioral",
+      "",
+      "",
+      "",
+      "behavioural"
     ]);
   });
 

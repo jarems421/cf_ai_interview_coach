@@ -449,6 +449,34 @@ button {
   background: var(--accent-strong);
 }
 
+.setupPanel textarea {
+  min-height: 72px;
+  max-height: 140px;
+  padding: 10px 12px;
+}
+
+.contextToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  border: 1px dashed var(--input-line);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.88rem;
+  font-weight: 700;
+  width: 100%;
+  justify-content: center;
+}
+
+.contextToggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .spin {
   animation: spin 0.9s linear infinite;
 }

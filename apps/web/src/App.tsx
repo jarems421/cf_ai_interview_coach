@@ -1,8 +1,12 @@
 import {
   Bot,
   BriefcaseBusiness,
+  Building2,
+  ChevronDown,
+  ChevronUp,
   ClipboardCheck,
   Download,
+  FileText,
   Loader2,
   Moon,
   MessageSquareText,
@@ -22,18 +26,39 @@ import {
   listSessions,
   sendChatMessage
 } from "./api";
-import type { Message, Session } from "./types";
+import type { InterviewMode, Message, Session } from "./types";
 
 type SetupForm = {
   role: string;
   level: string;
   focus: string;
+  companyName: string;
+  interviewMode: InterviewMode;
+  cvText: string;
+  jobDescription: string;
 };
+
+const INTERVIEW_MODES: { value: InterviewMode; label: string }[] = [
+  { value: "behavioural", label: "Behavioural" },
+  { value: "technical", label: "Technical" },
+  { value: "project_deep_dive", label: "Project deep-dive" },
+  { value: "company_motivation", label: "Company motivation" },
+  { value: "weakness_gap", label: "Weakness / gap" },
+  { value: "final_simulation", label: "Final simulation" }
+];
+
+const INTERVIEW_MODE_LABELS: Record<InterviewMode, string> = Object.fromEntries(
+  INTERVIEW_MODES.map(({ value, label }) => [value, label])
+) as Record<InterviewMode, string>;
 
 const defaultSetup: SetupForm = {
   role: "Frontend Engineer",
   level: "Mid-level",
-  focus: "Behavioral and technical communication"
+  focus: "Behavioral and technical communication",
+  companyName: "",
+  interviewMode: "behavioural",
+  cvText: "",
+  jobDescription: ""
 };
 
 const themeStorageKey = "cf_ai_interview_coach_theme";
@@ -63,6 +88,7 @@ export function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [setup, setSetup] = useState(defaultSetup);
+  const [showContext, setShowContext] = useState(false);
   const [draft, setDraft] = useState("");
   const [isLoadingSessions, setIsLoadingSessions] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
@@ -226,6 +252,8 @@ export function App() {
       "",
       `Role: ${activeSession.role}`,
       `Level: ${activeSession.level}`,
+      `Company: ${activeSession.companyName || "Not specified"}`,
+      `Interview Mode: ${INTERVIEW_MODE_LABELS[activeSession.interviewMode] ?? activeSession.interviewMode}`,
       `Focus: ${activeSession.focus}`,
       "",
       ...messages.flatMap((message) => [
@@ -313,6 +341,43 @@ export function App() {
 
           <label>
             <span>
+              <Building2 size={16} aria-hidden="true" />
+              Company name
+            </span>
+            <input
+              value={setup.companyName}
+              onChange={(event) =>
+                setSetup((current) => ({ ...current, companyName: event.target.value }))
+              }
+              placeholder="e.g. Cloudflare (optional)"
+              maxLength={120}
+            />
+          </label>
+
+          <label>
+            <span>
+              <Target size={16} aria-hidden="true" />
+              Interview mode
+            </span>
+            <select
+              value={setup.interviewMode}
+              onChange={(event) =>
+                setSetup((current) => ({
+                  ...current,
+                  interviewMode: event.target.value as InterviewMode
+                }))
+              }
+            >
+              {INTERVIEW_MODES.map(({ value, label }) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span>
               <Target size={16} aria-hidden="true" />
               Focus
             </span>
@@ -325,6 +390,62 @@ export function App() {
               required
             />
           </label>
+
+          <button
+            className="contextToggle"
+            type="button"
+            onClick={() => setShowContext((v) => !v)}
+            aria-expanded={showContext}
+          >
+            <FileText size={15} aria-hidden="true" />
+            {showContext ? "Hide" : "Add"} CV &amp; job description
+            {showContext ? (
+              <ChevronUp size={15} aria-hidden="true" />
+            ) : (
+              <ChevronDown size={15} aria-hidden="true" />
+            )}
+          </button>
+
+          {showContext && (
+            <>
+              <label>
+                <span>
+                  <FileText size={16} aria-hidden="true" />
+                  CV / Resume
+                </span>
+                <textarea
+                  className="setupTextarea"
+                  value={setup.cvText}
+                  onChange={(event) =>
+                    setSetup((current) => ({ ...current, cvText: event.target.value }))
+                  }
+                  placeholder="Paste your CV or resume text here (optional)..."
+                  rows={4}
+                  maxLength={6000}
+                />
+              </label>
+
+              <label>
+                <span>
+                  <BriefcaseBusiness size={16} aria-hidden="true" />
+                  Job description
+                </span>
+                <textarea
+                  className="setupTextarea"
+                  value={setup.jobDescription}
+                  onChange={(event) =>
+                    setSetup((current) => ({
+                      ...current,
+                      jobDescription: event.target.value
+                    }))
+                  }
+                  placeholder="Paste the job description here (optional)..."
+                  rows={4}
+                  maxLength={4000}
+                />
+              </label>
+            </>
+          )}
 
           <button className="primaryButton" type="submit" disabled={isCreating}>
             {isCreating ? <Loader2 className="spin" size={18} /> : <Plus size={18} />}
@@ -350,9 +471,14 @@ export function App() {
                 onClick={() => void loadMessages(session.id)}
                 type="button"
               >
-                <strong>{session.role}</strong>
+                <strong>
+                  {session.companyName
+                    ? `${session.companyName} — ${session.role}`
+                    : session.role}
+                </strong>
                 <span>
-                  {session.level} - {session.focus}
+                  {session.level} ·{" "}
+                  {INTERVIEW_MODE_LABELS[session.interviewMode] ?? session.focus}
                 </span>
               </button>
             ))
@@ -363,7 +489,13 @@ export function App() {
       <section className="workspace" aria-label="Interview chat">
         <header className="chatHeader">
           <div>
-            <p>{activeSession ? activeSession.focus : "Start a session"}</p>
+            <p>
+              {activeSession
+                ? activeSession.companyName
+                  ? `${activeSession.companyName} · ${INTERVIEW_MODE_LABELS[activeSession.interviewMode] ?? activeSession.focus}`
+                  : INTERVIEW_MODE_LABELS[activeSession.interviewMode] ?? activeSession.focus
+                : "Start a session"}
+            </p>
             <h2>
               {activeSession
                 ? `${activeSession.level} ${activeSession.role}`

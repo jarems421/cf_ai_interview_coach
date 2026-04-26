@@ -14,13 +14,21 @@ import {
   shouldUpdateSummary
 } from "./ai";
 import { HttpError, json, noContent, readJson, requireString } from "./http";
-import type { Env } from "./types";
+import {
+  buildFirstQuestionInstruction,
+  buildNextQuestionInstruction
+} from "./prompts";
+import type { Env, InterviewMode } from "./types";
 
 type CreateSessionBody = {
   clientId?: unknown;
   role?: unknown;
   level?: unknown;
   focus?: unknown;
+  companyName?: unknown;
+  cvText?: unknown;
+  jobDescription?: unknown;
+  interviewMode?: unknown;
 };
 
 type ChatBody = {
@@ -38,6 +46,22 @@ type ChatAction =
   | "scorecard"
   | "improve_answer";
 
+const VALID_INTERVIEW_MODES: InterviewMode[] = [
+  "behavioural",
+  "technical",
+  "project_deep_dive",
+  "company_motivation",
+  "weakness_gap",
+  "final_simulation"
+];
+
+function getInterviewMode(value: unknown): InterviewMode {
+  if (typeof value === "string" && (VALID_INTERVIEW_MODES as string[]).includes(value)) {
+    return value as InterviewMode;
+  }
+  return "behavioural";
+}
+
 function getChatAction(value: unknown): ChatAction {
   if (
     value === "first_question" ||
@@ -52,13 +76,18 @@ function getChatAction(value: unknown): ChatAction {
   return "message";
 }
 
-function buildActionInstruction(action: ChatAction, message: string) {
+function buildActionInstruction(
+  action: ChatAction,
+  message: string,
+  interviewMode: InterviewMode,
+  companyName: string
+) {
   if (action === "first_question") {
-    return "Start the mock interview by asking exactly one focused opening question for the candidate's target role and level. Do not score the candidate yet.";
+    return buildFirstQuestionInstruction(interviewMode, companyName);
   }
 
   if (action === "next_question") {
-    return "Continue the mock interview like a real interviewer. Ask exactly one new follow-up or next-stage question based on the candidate's target role, level, focus area, and prior answers. Avoid repeating earlier questions.";
+    return buildNextQuestionInstruction(interviewMode, companyName);
   }
 
   if (action === "technical_question") {
@@ -95,12 +124,25 @@ export default {
         const role = requireString(body.role, "role");
         const level = requireString(body.level, "level");
         const focus = requireString(body.focus, "focus");
+        const companyName =
+          typeof body.companyName === "string" ? body.companyName.trim().slice(0, 120) : "";
+        const cvText =
+          typeof body.cvText === "string" ? body.cvText.trim().slice(0, 6000) : "";
+        const jobDescription =
+          typeof body.jobDescription === "string"
+            ? body.jobDescription.trim().slice(0, 4000)
+            : "";
+        const interviewMode = getInterviewMode(body.interviewMode);
 
         const sessionId = await createSession(env.DB, {
           clientId,
           role,
           level,
-          focus
+          focus,
+          companyName,
+          cvText,
+          jobDescription,
+          interviewMode
         });
 
         return json({ sessionId }, { status: 201 });
@@ -167,7 +209,14 @@ export default {
           summary,
           messages: recentMessages,
           instruction:
-            action === "message" ? undefined : buildActionInstruction(action, message)
+            action === "message"
+              ? undefined
+              : buildActionInstruction(
+                  action,
+                  message,
+                  (session.interviewMode as InterviewMode) ?? "behavioural",
+                  session.companyName ?? ""
+                )
         });
 
         await addMessage(env.DB, sessionId, "assistant", reply);

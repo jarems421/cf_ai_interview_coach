@@ -30,6 +30,10 @@ export async function createSession(input: {
   role: string;
   level: string;
   focus: string;
+  companyName?: string;
+  cvText?: string;
+  jobDescription?: string;
+  interviewMode?: string;
 }) {
   const response = await fetch(`${API_BASE}/api/sessions`, {
     method: "POST",

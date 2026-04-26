@@ -1,5 +1,5 @@
 import { buildSessionContext, buildSummaryPrompt, COACH_SYSTEM_PROMPT } from "./prompts";
-import type { Message, Session, SessionSummary } from "./types";
+import type { InterviewMode, Message, Session, SessionSummary } from "./types";
 
 const MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
@@ -49,6 +49,10 @@ export async function generateCoachReply(input: {
         role: input.session.role,
         level: input.session.level,
         focus: input.session.focus,
+        companyName: input.session.companyName,
+        cvText: input.session.cvText,
+        jobDescription: input.session.jobDescription,
+        interviewMode: input.session.interviewMode as InterviewMode,
         summary: input.summary?.summary,
         strengths: input.summary?.strengths,
         improvementAreas: input.summary?.improvementAreas
