@@ -1,17 +1,80 @@
-export interface Env {
-  AI: Ai;
-  DB: D1Database;
-}
+import {
+  createSession,
+  getSession,
+  listMessages,
+  listSessions
+} from "./db";
+import { HttpError, json, noContent, readJson, requireString } from "./http";
+import type { Env } from "./types";
 
-export default {
-  async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-
-    if (url.pathname === "/api/health") {
-      return Response.json({ ok: true, service: "cf_ai_interview_coach" });
-    }
-
-    return Response.json({ error: "Not found" }, { status: 404 });
-  }
+type CreateSessionBody = {
+  clientId?: unknown;
+  role?: unknown;
+  level?: unknown;
+  focus?: unknown;
 };
 
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    if (request.method === "OPTIONS") {
+      return noContent();
+    }
+
+    try {
+      const url = new URL(request.url);
+
+      if (url.pathname === "/api/health") {
+        return json({ ok: true, service: "cf_ai_interview_coach" });
+      }
+
+      if (url.pathname === "/api/sessions" && request.method === "POST") {
+        const body = await readJson<CreateSessionBody>(request);
+        const clientId = requireString(body.clientId, "clientId");
+        const role = requireString(body.role, "role");
+        const level = requireString(body.level, "level");
+        const focus = requireString(body.focus, "focus");
+
+        const sessionId = await createSession(env.DB, {
+          clientId,
+          role,
+          level,
+          focus
+        });
+
+        return json({ sessionId }, { status: 201 });
+      }
+
+      if (url.pathname === "/api/sessions" && request.method === "GET") {
+        const clientId = requireString(url.searchParams.get("clientId"), "clientId");
+        return json({ sessions: await listSessions(env.DB, clientId) });
+      }
+
+      const messagesMatch = url.pathname.match(
+        /^\/api\/sessions\/([^/]+)\/messages$/
+      );
+
+      if (messagesMatch && request.method === "GET") {
+        const sessionId = decodeURIComponent(messagesMatch[1]);
+        const session = await getSession(env.DB, sessionId);
+
+        if (!session) {
+          throw new HttpError(404, "Session not found.");
+        }
+
+        return json({ messages: await listMessages(env.DB, sessionId) });
+      }
+
+      return json({ error: "Not found" }, { status: 404 });
+    } catch (error) {
+      if (error instanceof HttpError) {
+        return json({ error: error.message }, { status: error.status });
+      }
+
+      console.error(error);
+      return json(
+        { error: "Something went wrong. Please try again." },
+        { status: 500 }
+      );
+    }
+  }
+};
