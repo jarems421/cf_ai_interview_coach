@@ -1,0 +1,13 @@
+name = "cf-ai-interview-coach-api"
+main = "src/index.ts"
+compatibility_date = "2026-04-26"
+
+[ai]
+binding = "AI"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "interview_coach"
+database_id = "replace-with-your-d1-database-id"
+migrations_dir = "migrations"
+
