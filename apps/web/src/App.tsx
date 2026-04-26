@@ -1,14 +1,21 @@
 import {
   Bot,
   BriefcaseBusiness,
+  ChevronDown,
+  ChevronUp,
   ClipboardCheck,
   Download,
+  FileText,
   Loader2,
+  Mic,
+  MicOff,
   Moon,
   MessageSquareText,
   Plus,
   Send,
   Sun,
+  Star,
+  Trash2,
   WandSparkles,
   Target,
   TerminalSquare,
@@ -17,26 +24,88 @@ import {
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   createSession,
+  deleteSession,
   getClientId,
   listMessages,
   listSessions,
   sendChatMessage
 } from "./api";
-import type { Message, Session } from "./types";
+import type { InterviewMode, Message, Session, SessionType } from "./types";
 
 type SetupForm = {
   role: string;
   level: string;
   focus: string;
+  cvText: string;
+  jobDescription: string;
+  companyName: string;
+  sessionType: SessionType;
+  interviewMode: InterviewMode;
 };
 
 const defaultSetup: SetupForm = {
   role: "Frontend Engineer",
   level: "Mid-level",
-  focus: "Behavioral and technical communication"
+  focus: "Behavioral and technical communication",
+  cvText: "",
+  jobDescription: "",
+  companyName: "",
+  sessionType: "quick_practice",
+  interviewMode: "behavioural"
+};
+
+const SESSION_TYPE_LABELS: Record<SessionType, string> = {
+  quick_practice: "Quick Practice",
+  full_mock: "Full Mock Interview",
+  project_defence: "Project Defence",
+  technical_screen: "Technical Screen",
+  company_specific: "Company-Specific"
+};
+
+const INTERVIEW_MODE_LABELS: Record<InterviewMode, string> = {
+  behavioural: "Behavioural",
+  technical: "Technical",
+  project_deep_dive: "Project Deep-dive",
+  company_motivation: "Company Motivation",
+  weakness_gap: "Weakness / Gap",
+  final_simulation: "Final Simulation"
 };
 
 const themeStorageKey = "cf_ai_interview_coach_theme";
+
+type SpeechRecognitionResult = {
+  readonly [index: number]: { transcript: string; confidence: number };
+  readonly length: number;
+};
+
+type SpeechRecognitionResultList = {
+  readonly [index: number]: SpeechRecognitionResult;
+  readonly length: number;
+};
+
+type SpeechRecognitionEvent = Event & {
+  readonly results: SpeechRecognitionResultList;
+};
+
+type SpeechRecognitionInstance = {
+  lang: string;
+  interimResults: boolean;
+  maxAlternatives: number;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+};
+
+type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
+
+const SpeechRecognitionAPI: SpeechRecognitionCtor | null =
+  typeof window !== "undefined"
+    ? ((window as unknown as { SpeechRecognition?: SpeechRecognitionCtor }).SpeechRecognition ??
+      (window as unknown as { webkitSpeechRecognition?: SpeechRecognitionCtor }).webkitSpeechRecognition ??
+      null)
+    : null;
 
 function getInitialTheme() {
   const requested = new URLSearchParams(window.location.search).get("theme");
@@ -68,8 +137,12 @@ export function App() {
   const [isCreating, setIsCreating] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? null,
@@ -78,6 +151,10 @@ export function App() {
   const lastUserMessage = useMemo(
     () => [...messages].reverse().find((message) => message.role === "user"),
     [messages]
+  );
+
+  const hasTailoring = Boolean(
+    activeSession?.cvText || activeSession?.jobDescription
   );
 
   useEffect(() => {
@@ -147,6 +224,30 @@ export function App() {
     }
   }
 
+  async function handleDeleteSession(sessionId: string) {
+    if (!confirm("Delete this session and all its messages?")) {
+      return;
+    }
+
+    setDeletingSessionId(sessionId);
+    setError(null);
+
+    try {
+      await deleteSession(sessionId, clientId);
+
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(null);
+        setMessages([]);
+      }
+
+      setSessions((current) => current.filter((s) => s.id !== sessionId));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not delete session.");
+    } finally {
+      setDeletingSessionId(null);
+    }
+  }
+
   async function handleSend(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = draft.trim();
@@ -161,14 +262,17 @@ export function App() {
       | "first_question"
       | "next_question"
       | "technical_question"
+      | "tailored_question"
+      | "rubric_score"
       | "scorecard"
       | "improve_answer"
+      | "generate_report"
   ) {
     if ((!content && action === "message") || !activeSessionId || isSending) {
       return;
     }
 
-    if (action === "scorecard" || action === "improve_answer") {
+    if (action === "scorecard" || action === "rubric_score" || action === "improve_answer" || action === "generate_report") {
       if (!lastUserMessage) {
         setError("Answer at least one interview question before using that action.");
         return;
@@ -221,12 +325,21 @@ export function App() {
       return;
     }
 
+    const sessionTypeLabel = SESSION_TYPE_LABELS[activeSession.sessionType] ?? activeSession.sessionType;
+    const modeLabel = INTERVIEW_MODE_LABELS[activeSession.interviewMode] ?? activeSession.interviewMode;
+
     const lines = [
       `# Interview Coach Session`,
       "",
       `Role: ${activeSession.role}`,
       `Level: ${activeSession.level}`,
       `Focus: ${activeSession.focus}`,
+      `Session Type: ${sessionTypeLabel}`,
+      `Interview Mode: ${modeLabel}`,
+      ...(activeSession.companyName ? [`Company: ${activeSession.companyName}`] : []),
+      `Date: ${new Date().toLocaleDateString()}`,
+      "",
+      "---",
       "",
       ...messages.flatMap((message) => [
         `## ${message.role === "assistant" ? "Coach" : "Candidate"}`,
@@ -235,6 +348,7 @@ export function App() {
         ""
       ])
     ];
+
     const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -242,6 +356,34 @@ export function App() {
     link.download = `interview-coach-${activeSession.id}.md`;
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  function toggleVoiceInput() {
+    if (!SpeechRecognitionAPI) return;
+
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognitionAPI();
+    recognition.lang = "en-US";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      const transcript = event.results[0][0].transcript;
+      setDraft((current) => (current ? `${current} ${transcript}` : transcript));
+      setIsListening(false);
+    };
+
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
+
+    recognitionRef.current = recognition;
+    setIsListening(true);
+    recognition.start();
   }
 
   const hasAssistantQuestion = messages.some(
@@ -326,6 +468,121 @@ export function App() {
             />
           </label>
 
+          <label>
+            <span>
+              <TerminalSquare size={16} aria-hidden="true" />
+              Session type
+            </span>
+            <select
+              value={setup.sessionType}
+              onChange={(event) =>
+                setSetup((current) => ({
+                  ...current,
+                  sessionType: event.target.value as SessionType
+                }))
+              }
+            >
+              {(Object.entries(SESSION_TYPE_LABELS) as [SessionType, string][]).map(
+                ([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                )
+              )}
+            </select>
+          </label>
+
+          <label>
+            <span>
+              <ClipboardCheck size={16} aria-hidden="true" />
+              Interview mode
+            </span>
+            <select
+              value={setup.interviewMode}
+              onChange={(event) =>
+                setSetup((current) => ({
+                  ...current,
+                  interviewMode: event.target.value as InterviewMode
+                }))
+              }
+            >
+              {(Object.entries(INTERVIEW_MODE_LABELS) as [InterviewMode, string][]).map(
+                ([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                )
+              )}
+            </select>
+          </label>
+
+          <button
+            className="advancedToggle"
+            type="button"
+            onClick={() => setShowAdvanced((v) => !v)}
+            aria-expanded={showAdvanced}
+          >
+            {showAdvanced ? (
+              <ChevronUp size={15} aria-hidden="true" />
+            ) : (
+              <ChevronDown size={15} aria-hidden="true" />
+            )}
+            {showAdvanced ? "Hide" : "Add"} CV &amp; job description
+          </button>
+
+          {showAdvanced && (
+            <>
+              <label>
+                <span>Company name (optional)</span>
+                <input
+                  value={setup.companyName}
+                  onChange={(event) =>
+                    setSetup((current) => ({
+                      ...current,
+                      companyName: event.target.value
+                    }))
+                  }
+                  placeholder="e.g. Cloudflare"
+                  maxLength={240}
+                />
+              </label>
+
+              <label>
+                <span>Your CV / resume (optional)</span>
+                <textarea
+                  className="setupTextarea"
+                  value={setup.cvText}
+                  onChange={(event) =>
+                    setSetup((current) => ({
+                      ...current,
+                      cvText: event.target.value
+                    }))
+                  }
+                  placeholder="Paste your CV or key experience here..."
+                  maxLength={8000}
+                  rows={5}
+                />
+              </label>
+
+              <label>
+                <span>Job description (optional)</span>
+                <textarea
+                  className="setupTextarea"
+                  value={setup.jobDescription}
+                  onChange={(event) =>
+                    setSetup((current) => ({
+                      ...current,
+                      jobDescription: event.target.value
+                    }))
+                  }
+                  placeholder="Paste the job description here..."
+                  maxLength={4000}
+                  rows={5}
+                />
+              </label>
+            </>
+          )}
+
           <button className="primaryButton" type="submit" disabled={isCreating}>
             {isCreating ? <Loader2 className="spin" size={18} /> : <Plus size={18} />}
             New session
@@ -341,20 +598,44 @@ export function App() {
           {isLoadingSessions ? (
             <p className="muted">Loading sessions...</p>
           ) : sessions.length === 0 ? (
-            <p className="muted">No sessions yet.</p>
+            <p className="muted">No sessions yet. Create one above to start practicing.</p>
           ) : (
             sessions.map((session) => (
-              <button
-                className={`sessionButton ${session.id === activeSessionId ? "active" : ""}`}
+              <div
+                className={`sessionItem ${session.id === activeSessionId ? "active" : ""}`}
                 key={session.id}
-                onClick={() => void loadMessages(session.id)}
-                type="button"
               >
-                <strong>{session.role}</strong>
-                <span>
-                  {session.level} - {session.focus}
-                </span>
-              </button>
+                <button
+                  className="sessionButton"
+                  onClick={() => void loadMessages(session.id)}
+                  type="button"
+                >
+                  <strong>{session.role}</strong>
+                  <span>
+                    {SESSION_TYPE_LABELS[session.sessionType] ?? session.sessionType}
+                  </span>
+                  <span>
+                    {session.level} · {INTERVIEW_MODE_LABELS[session.interviewMode] ?? session.interviewMode}
+                  </span>
+                  {session.companyName && (
+                    <span className="sessionCompany">{session.companyName}</span>
+                  )}
+                </button>
+                <button
+                  className="sessionDeleteButton"
+                  type="button"
+                  onClick={() => void handleDeleteSession(session.id)}
+                  disabled={deletingSessionId === session.id}
+                  aria-label="Delete session"
+                  title="Delete session"
+                >
+                  {deletingSessionId === session.id ? (
+                    <Loader2 className="spin" size={14} aria-hidden="true" />
+                  ) : (
+                    <Trash2 size={14} aria-hidden="true" />
+                  )}
+                </button>
+              </div>
             ))
           )}
         </div>
@@ -363,7 +644,11 @@ export function App() {
       <section className="workspace" aria-label="Interview chat">
         <header className="chatHeader">
           <div>
-            <p>{activeSession ? activeSession.focus : "Start a session"}</p>
+            <p>
+              {activeSession
+                ? `${SESSION_TYPE_LABELS[activeSession.sessionType] ?? activeSession.sessionType} · ${INTERVIEW_MODE_LABELS[activeSession.interviewMode] ?? activeSession.interviewMode}${activeSession.companyName ? ` · ${activeSession.companyName}` : ""}`
+                : "Start a session"}
+            </p>
             <h2>
               {activeSession
                 ? `${activeSession.level} ${activeSession.role}`
@@ -392,8 +677,11 @@ export function App() {
                   : "Create a session to start your mock interview."}
               </h3>
               <p>
-                The coach will keep memory for this browser and adapt feedback as
-                the interview develops.
+                {activeSession
+                  ? hasTailoring
+                    ? "CV and job description loaded — use \"Tailored question\" for personalised questions."
+                    : "The coach will keep memory for this browser and adapt feedback as the interview develops."
+                  : "Choose your role, session type, and optionally add your CV and job description for personalised questions."}
               </p>
             </div>
           ) : (
@@ -443,6 +731,24 @@ export function App() {
             <TerminalSquare size={17} aria-hidden="true" />
             Technical question
           </button>
+          {hasTailoring && (
+            <button
+              type="button"
+              onClick={() => void sendContent("", "tailored_question")}
+              disabled={!activeSession || isSending}
+            >
+              <FileText size={17} aria-hidden="true" />
+              Tailored question
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void sendContent("", "rubric_score")}
+            disabled={!activeSession || isSending || !lastUserMessage}
+          >
+            <Star size={17} aria-hidden="true" />
+            Rubric score
+          </button>
           <button
             type="button"
             onClick={() =>
@@ -468,6 +774,14 @@ export function App() {
           </button>
           <button
             type="button"
+            onClick={() => void sendContent("", "generate_report")}
+            disabled={!activeSession || isSending || !lastUserMessage}
+          >
+            <FileText size={17} aria-hidden="true" />
+            Final report
+          </button>
+          <button
+            type="button"
             onClick={exportTranscript}
             disabled={!activeSession || messages.length === 0}
           >
@@ -489,15 +803,33 @@ export function App() {
             rows={3}
             maxLength={2000}
           />
-          <button
-            className="sendButton"
-            type="submit"
-            disabled={!activeSession || !draft.trim() || isSending}
-            aria-label="Send message"
-            title="Send message"
-          >
-            {isSending ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
-          </button>
+          <div className="composerActions">
+            {SpeechRecognitionAPI && (
+              <button
+                className={`voiceButton ${isListening ? "listening" : ""}`}
+                type="button"
+                onClick={toggleVoiceInput}
+                disabled={!activeSession || isSending}
+                aria-label={isListening ? "Stop recording" : "Start voice input"}
+                title={isListening ? "Stop recording" : "Start voice input"}
+              >
+                {isListening ? (
+                  <MicOff size={18} aria-hidden="true" />
+                ) : (
+                  <Mic size={18} aria-hidden="true" />
+                )}
+              </button>
+            )}
+            <button
+              className="sendButton"
+              type="submit"
+              disabled={!activeSession || !draft.trim() || isSending}
+              aria-label="Send message"
+              title="Send message"
+            >
+              {isSending ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
+            </button>
+          </div>
         </form>
       </section>
     </main>

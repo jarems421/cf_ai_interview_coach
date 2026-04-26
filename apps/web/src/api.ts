@@ -1,4 +1,4 @@
-import type { Message, Session } from "./types";
+import type { Message, Session, SessionType, InterviewMode } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -30,6 +30,11 @@ export async function createSession(input: {
   role: string;
   level: string;
   focus: string;
+  cvText?: string;
+  jobDescription?: string;
+  companyName?: string;
+  sessionType?: SessionType;
+  interviewMode?: InterviewMode;
 }) {
   const response = await fetch(`${API_BASE}/api/sessions`, {
     method: "POST",
@@ -46,6 +51,19 @@ export async function listSessions(clientId: string) {
   return parseResponse<{ sessions: Session[] }>(response);
 }
 
+export async function deleteSession(sessionId: string, clientId: string) {
+  const params = new URLSearchParams({ clientId });
+  const response = await fetch(`${API_BASE}/api/sessions/${sessionId}?${params}`, {
+    method: "DELETE"
+  });
+
+  if (response.status === 204) {
+    return;
+  }
+
+  return parseResponse<void>(response);
+}
+
 export async function listMessages(sessionId: string) {
   const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/messages`);
   return parseResponse<{ messages: Message[] }>(response);
@@ -60,8 +78,11 @@ export async function sendChatMessage(input: {
     | "first_question"
     | "next_question"
     | "technical_question"
+    | "tailored_question"
+    | "rubric_score"
     | "scorecard"
-    | "improve_answer";
+    | "improve_answer"
+    | "generate_report";
 }) {
   const response = await fetch(`${API_BASE}/api/chat`, {
     method: "POST",
