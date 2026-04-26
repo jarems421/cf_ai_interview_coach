@@ -214,7 +214,7 @@ export default {
               : buildActionInstruction(
                   action,
                   message,
-                  (session.interviewMode as InterviewMode) ?? "behavioural",
+                  session.interviewMode ?? "behavioural",
                   session.companyName ?? ""
                 )
         });

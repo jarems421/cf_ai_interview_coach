@@ -477,8 +477,7 @@ export function App() {
                     : session.role}
                 </strong>
                 <span>
-                  {session.level} ·{" "}
-                  {INTERVIEW_MODE_LABELS[session.interviewMode] ?? session.focus}
+                  {session.level} · {INTERVIEW_MODE_LABELS[session.interviewMode] ?? session.focus}
                 </span>
               </button>
             ))
