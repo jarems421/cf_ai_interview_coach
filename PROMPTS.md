@@ -36,6 +36,10 @@ and think step by stp no rushing
 implement
 ```
 
+```text
+can you not do all that including the improvements
+```
+
 ## App System Prompt
 
 ```text
@@ -78,4 +82,3 @@ Return only valid JSON with these string fields:
 Transcript:
 {recent transcript}
 ```
-

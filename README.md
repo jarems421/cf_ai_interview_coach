@@ -16,6 +16,14 @@ AI Interview Coach is a Cloudflare AI application for practicing interview answe
 3. Send answers or ask for practice questions.
 4. The Worker stores each turn in D1, sends recent context plus summary memory to Workers AI, stores the reply, and periodically updates coaching memory.
 
+## Features
+
+- Persistent mock interview sessions per browser identity.
+- Context-aware coaching with recent chat history and rolling D1 memory.
+- Quick actions for starting an interview, generating a scorecard, and improving the last answer.
+- Markdown export for a session transcript.
+- Local API tests with mocked D1 and mocked Workers AI.
+
 ## Local Setup
 
 Install dependencies:
@@ -90,7 +98,7 @@ Set the Pages environment variable `VITE_API_BASE_URL` to the deployed Worker UR
 
 ## Live Demo
 
-Deployment is ready once the Cloudflare account-specific D1 database id and Pages environment variable are configured.
+Deployment is ready once Wrangler is authenticated, the Cloudflare account-specific D1 database id is added to `apps/api/wrangler.toml`, and the Pages `VITE_API_BASE_URL` environment variable points to the deployed Worker.
 
 ## Project Notes
 
@@ -99,10 +107,16 @@ Deployment is ready once the Cloudflare account-specific D1 database id and Page
 - No user accounts, voice input, payments, or external APIs are required for v1.
 - Development prompts and AI prompt text are documented in `PROMPTS.md`.
 
+## Future Improvements
+
+- Add voice input using browser recording and Cloudflare AI transcription.
+- Add shareable session links behind lightweight authentication.
+- Add rubric presets for behavioral, system design, coding, and leadership interviews.
+- Add an explicit end-of-session report stored separately from chat messages.
+
 ## Useful Cloudflare Docs
 
 - Workers AI Llama 3.3 model: https://developers.cloudflare.com/workers-ai/models/llama-3.3-70b-instruct-fp8-fast/
 - Workers AI bindings: https://developers.cloudflare.com/workers-ai/configuration/bindings/
 - D1 databases: https://developers.cloudflare.com/d1/
 - Pages deployments: https://developers.cloudflare.com/pages/
-

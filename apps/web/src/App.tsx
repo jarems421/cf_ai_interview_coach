@@ -1,10 +1,13 @@
 import {
   Bot,
   BriefcaseBusiness,
+  ClipboardCheck,
+  Download,
   Loader2,
   MessageSquareText,
   Plus,
   Send,
+  WandSparkles,
   Target,
   UserRound
 } from "lucide-react";
@@ -47,6 +50,10 @@ export function App() {
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? null,
     [activeSessionId, sessions]
+  );
+  const lastUserMessage = useMemo(
+    () => [...messages].reverse().find((message) => message.role === "user"),
+    [messages]
   );
 
   useEffect(() => {
@@ -115,6 +122,10 @@ export function App() {
     event.preventDefault();
     const content = draft.trim();
 
+    await sendContent(content);
+  }
+
+  async function sendContent(content: string) {
     if (!content || !activeSessionId || isSending) {
       return;
     }
@@ -155,6 +166,34 @@ export function App() {
     } finally {
       setIsSending(false);
     }
+  }
+
+  function exportTranscript() {
+    if (!activeSession) {
+      return;
+    }
+
+    const lines = [
+      `# Interview Coach Session`,
+      "",
+      `Role: ${activeSession.role}`,
+      `Level: ${activeSession.level}`,
+      `Focus: ${activeSession.focus}`,
+      "",
+      ...messages.flatMap((message) => [
+        `## ${message.role === "assistant" ? "Coach" : "Candidate"}`,
+        "",
+        message.content,
+        ""
+      ])
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `interview-coach-${activeSession.id}.md`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -246,7 +285,7 @@ export function App() {
               >
                 <strong>{session.role}</strong>
                 <span>
-                  {session.level} · {session.focus}
+                  {session.level} - {session.focus}
                 </span>
               </button>
             ))
@@ -315,6 +354,53 @@ export function App() {
           )}
         </div>
 
+        <div className="quickActions" aria-label="Coaching actions">
+          <button
+            type="button"
+            onClick={() =>
+              void sendContent(
+                "Start this mock interview by asking me one focused question for my target role."
+              )
+            }
+            disabled={!activeSession || isSending}
+          >
+            <MessageSquareText size={17} aria-hidden="true" />
+            First question
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              void sendContent(
+                "Give me a concise scorecard for this session with strengths, improvement areas, and one drill to practice next."
+              )
+            }
+            disabled={!activeSession || isSending || messages.length === 0}
+          >
+            <ClipboardCheck size={17} aria-hidden="true" />
+            Scorecard
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              void sendContent(
+                `Rewrite my previous answer using the STAR format and explain the strongest change. Previous answer: ${lastUserMessage?.content ?? ""}`
+              )
+            }
+            disabled={!activeSession || isSending || !lastUserMessage}
+          >
+            <WandSparkles size={17} aria-hidden="true" />
+            Improve answer
+          </button>
+          <button
+            type="button"
+            onClick={exportTranscript}
+            disabled={!activeSession || messages.length === 0}
+          >
+            <Download size={17} aria-hidden="true" />
+            Export
+          </button>
+        </div>
+
         <form className="composer" onSubmit={handleSend}>
           <textarea
             value={draft}
@@ -342,4 +428,3 @@ export function App() {
     </main>
   );
 }
-
