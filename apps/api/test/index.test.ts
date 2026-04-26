@@ -39,7 +39,23 @@ function createEnv(results: Record<string, unknown[]> = {}) {
   return { env, calls };
 }
 
-function createChatEnv() {
+function createChatEnv(
+  storedMessages: Array<{
+    id: number;
+    sessionId: string;
+    role: "user" | "assistant";
+    content: string;
+    createdAt: string;
+  }> = [
+    {
+      id: 1,
+      sessionId: "session-1",
+      role: "user",
+      content: "I led a migration project.",
+      createdAt: new Date(0).toISOString()
+    }
+  ]
+) {
   const calls: Array<{ sql: string; params: unknown[] }> = [];
   const aiCalls: unknown[] = [];
   const session = {
@@ -90,15 +106,7 @@ function createChatEnv() {
           },
           async all<T>() {
             return {
-              results: [
-                {
-                  id: 1,
-                  sessionId: "session-1",
-                  role: "user",
-                  content: "I led a migration project.",
-                  createdAt: new Date(0).toISOString()
-                }
-              ] as T[],
+              results: storedMessages as T[],
               success: true,
               meta: {}
             };
@@ -193,5 +201,46 @@ describe("worker", () => {
     expect(aiCalls).toHaveLength(1);
     expect(calls.some((call) => call.params.includes("user"))).toBe(true);
     expect(calls.some((call) => call.params.includes("assistant"))).toBe(true);
+  });
+
+  it("runs quick actions without storing them as user turns", async () => {
+    const { env, calls, aiCalls } = createChatEnv();
+    const response = await worker.fetch(
+      new Request("https://example.com/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          clientId: "browser-1",
+          sessionId: "session-1",
+          action: "first_question"
+        })
+      }),
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(aiCalls).toHaveLength(1);
+    expect(calls.some((call) => call.params.includes("user"))).toBe(false);
+    expect(calls.some((call) => call.params.includes("assistant"))).toBe(true);
+  });
+
+  it("does not score a session before the candidate answers", async () => {
+    const { env, aiCalls } = createChatEnv([]);
+    const response = await worker.fetch(
+      new Request("https://example.com/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          clientId: "browser-1",
+          sessionId: "session-1",
+          action: "scorecard"
+        })
+      }),
+      env
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      reply: expect.stringContaining("at least one candidate answer")
+    });
+    expect(aiCalls).toHaveLength(0);
   });
 });

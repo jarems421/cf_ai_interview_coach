@@ -150,24 +150,36 @@ export function App() {
     event.preventDefault();
     const content = draft.trim();
 
-    await sendContent(content);
+    await sendContent(content, "message");
   }
 
-  async function sendContent(content: string) {
-    if (!content || !activeSessionId || isSending) {
+  async function sendContent(
+    content: string,
+    action: "message" | "first_question" | "scorecard" | "improve_answer"
+  ) {
+    if ((!content && action === "message") || !activeSessionId || isSending) {
       return;
     }
 
-    const optimisticMessage: Message = {
-      id: Date.now() * -1,
-      sessionId: activeSessionId,
-      role: "user",
-      content,
-      createdAt: new Date().toISOString()
-    };
+    if (action === "scorecard" || action === "improve_answer") {
+      if (!lastUserMessage) {
+        setError("Answer at least one interview question before using that action.");
+        return;
+      }
+    }
 
-    setDraft("");
-    setMessages((current) => [...current, optimisticMessage]);
+    if (action === "message") {
+      const optimisticMessage: Message = {
+        id: Date.now() * -1,
+        sessionId: activeSessionId,
+        role: "user",
+        content,
+        createdAt: new Date().toISOString()
+      };
+
+      setDraft("");
+      setMessages((current) => [...current, optimisticMessage]);
+    }
     setIsSending(true);
     setError(null);
 
@@ -175,7 +187,8 @@ export function App() {
       const result = await sendChatMessage({
         clientId,
         sessionId: activeSessionId,
-        message: content
+        message: content,
+        action
       });
 
       setMessages((current) => [
@@ -401,9 +414,7 @@ export function App() {
           <button
             type="button"
             onClick={() =>
-              void sendContent(
-                "Start a realistic mock interview. Ask one focused opening question for my target role and level, and make it slightly challenging."
-              )
+              void sendContent("", "first_question")
             }
             disabled={!activeSession || isSending}
           >
@@ -413,11 +424,9 @@ export function App() {
           <button
             type="button"
             onClick={() =>
-              void sendContent(
-                "Give me a concise interviewer scorecard for this session: overall readiness, strongest signal, biggest risk, and one drill to practice next."
-              )
+              void sendContent("", "scorecard")
             }
-            disabled={!activeSession || isSending || messages.length === 0}
+            disabled={!activeSession || isSending || !lastUserMessage}
           >
             <ClipboardCheck size={17} aria-hidden="true" />
             Scorecard
@@ -426,7 +435,8 @@ export function App() {
             type="button"
             onClick={() =>
               void sendContent(
-                `Rewrite my previous answer into a stronger interview answer using STAR format. Keep it natural, add measurable impact where possible, and explain the single strongest change. Previous answer: ${lastUserMessage?.content ?? ""}`
+                lastUserMessage?.content ?? "",
+                "improve_answer"
               )
             }
             disabled={!activeSession || isSending || !lastUserMessage}

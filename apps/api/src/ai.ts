@@ -39,6 +39,7 @@ export async function generateCoachReply(input: {
   session: Session;
   summary?: SessionSummary | null;
   messages: Message[];
+  instruction?: string;
 }) {
   const messages: AiMessage[] = [
     { role: "system", content: COACH_SYSTEM_PROMPT },
@@ -58,7 +59,10 @@ export async function generateCoachReply(input: {
       .map((message) => ({
         role: message.role,
         content: message.content
-      }))
+      })),
+    ...(input.instruction
+      ? [{ role: "user" as const, content: input.instruction }]
+      : [])
   ];
 
   const result = await input.ai.run(MODEL, {

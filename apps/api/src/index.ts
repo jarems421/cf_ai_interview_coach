@@ -27,7 +27,38 @@ type ChatBody = {
   clientId?: unknown;
   sessionId?: unknown;
   message?: unknown;
+  action?: unknown;
 };
+
+type ChatAction = "message" | "first_question" | "scorecard" | "improve_answer";
+
+function getChatAction(value: unknown): ChatAction {
+  if (
+    value === "first_question" ||
+    value === "scorecard" ||
+    value === "improve_answer"
+  ) {
+    return value;
+  }
+
+  return "message";
+}
+
+function buildActionInstruction(action: ChatAction, message: string) {
+  if (action === "first_question") {
+    return "Start or continue the mock interview by asking exactly one focused opening question for the candidate's target role and level. Do not score the candidate yet.";
+  }
+
+  if (action === "scorecard") {
+    return "Give a concise interviewer scorecard based only on the candidate answers in this transcript. Include: overall readiness, strongest signal, biggest risk, and one drill to practice next. If evidence is thin, say so plainly.";
+  }
+
+  if (action === "improve_answer") {
+    return `Rewrite the candidate's previous answer into a stronger interview answer using STAR format. Keep it natural, add measurable impact where possible, and explain the single strongest change. Previous answer: ${message}`;
+  }
+
+  return message;
+}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -83,25 +114,44 @@ export default {
         const body = await readJson<ChatBody>(request);
         const clientId = requireString(body.clientId, "clientId");
         const sessionId = requireString(body.sessionId, "sessionId");
-        const message = requireString(body.message, "message", 2000);
+        const action = getChatAction(body.action);
+        const message =
+          action === "message" || action === "improve_answer"
+            ? requireString(body.message, "message", 2000)
+            : "";
         const session = await getSession(env.DB, sessionId);
 
         if (!session || session.clientId !== clientId) {
           throw new HttpError(404, "Session not found.");
         }
 
-        await addMessage(env.DB, sessionId, "user", message);
+        if (action === "message") {
+          await addMessage(env.DB, sessionId, "user", message);
+        }
 
         const [summary, recentMessages] = await Promise.all([
           getSummary(env.DB, sessionId),
           listRecentMessages(env.DB, sessionId)
         ]);
 
+        const hasCandidateAnswer = recentMessages.some(
+          (recentMessage) => recentMessage.role === "user"
+        );
+
+        if ((action === "scorecard" || action === "improve_answer") && !hasCandidateAnswer) {
+          return json({
+            reply:
+              "I need at least one candidate answer before I can do that. Answer the current interview question first, then I can score or improve it."
+          });
+        }
+
         const reply = await generateCoachReply({
           ai: env.AI,
           session,
           summary,
-          messages: recentMessages
+          messages: recentMessages,
+          instruction:
+            action === "message" ? undefined : buildActionInstruction(action, message)
         });
 
         await addMessage(env.DB, sessionId, "assistant", reply);
