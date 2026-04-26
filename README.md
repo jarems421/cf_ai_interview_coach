@@ -94,11 +94,14 @@ Deploy the Pages frontend:
 npm run deploy:web
 ```
 
-Set the Pages environment variable `VITE_API_BASE_URL` to the deployed Worker URL, then redeploy Pages.
+If you change the Worker URL, update `apps/web/.env.production` before redeploying Pages.
 
 ## Live Demo
 
-Deployment is ready once Wrangler is authenticated, the Cloudflare account-specific D1 database id is added to `apps/api/wrangler.toml`, and the Pages `VITE_API_BASE_URL` environment variable points to the deployed Worker.
+- App: https://cf-ai-interview-coach-bml.pages.dev
+- Worker API health: https://cf-ai-interview-coach-api.jarems421.workers.dev/api/health
+
+The frontend production build uses `apps/web/.env.production` so deployed Pages requests go to the live Worker API.
 
 ## Project Notes
 
