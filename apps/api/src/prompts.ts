@@ -68,12 +68,14 @@ export function buildSessionContext(input: {
     .filter(Boolean)
     .join("\n\n");
 
+  const tailoringSection = tailoring ? `Tailoring context:\n${tailoring}\n\n` : "";
+
   return `Candidate target:
 - Role: ${input.role}
 - Level: ${input.level}
 - Focus: ${input.focus}
 
-${tailoring ? `Tailoring context:\n${tailoring}\n\n` : ""}Memory:
+${tailoringSection}Memory:
 ${memory || "No prior coaching memory yet."}`;
 }
 

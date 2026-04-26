@@ -114,7 +114,14 @@ function buildActionInstruction(action: ChatAction, message: string, session?: {
 
   if (action === "tailored_question") {
     const company = session?.companyName ? ` at ${session.companyName}` : "";
-    return `Based on the candidate's CV and the job description provided, generate exactly one highly relevant interview question for the ${SESSION_TYPE_LABELS[session?.sessionType ?? "quick_practice"] ?? "interview"} session${company}. The question should directly reference the candidate's experience or the specific requirements in the job description.`;
+    const sessionLabel =
+      SESSION_TYPE_LABELS[session?.sessionType ?? "quick_practice"] ?? "interview";
+    return (
+      `Based on the candidate's CV and the job description provided, generate exactly one ` +
+      `highly relevant interview question for the ${sessionLabel} session${company}. ` +
+      `The question should directly reference the candidate's experience or the specific ` +
+      `requirements in the job description.`
+    );
   }
 
   if (action === "rubric_score") {

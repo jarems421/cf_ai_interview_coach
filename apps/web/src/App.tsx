@@ -161,6 +161,13 @@ export function App() {
     activeSession?.cvText || activeSession?.jobDescription
   );
 
+  const requiresAnswer = new Set([
+    "scorecard",
+    "rubric_score",
+    "improve_answer",
+    "generate_report"
+  ] as const);
+
   function formatTimer(seconds: number) {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
@@ -211,7 +218,7 @@ export function App() {
     }
 
     return () => {
-      if (timerIntervalRef.current !== null && !hasDraft) {
+      if (timerIntervalRef.current !== null) {
         clearInterval(timerIntervalRef.current);
       }
     };
@@ -316,7 +323,7 @@ export function App() {
       return;
     }
 
-    if (action === "scorecard" || action === "rubric_score" || action === "improve_answer" || action === "generate_report") {
+    if (requiresAnswer.has(action as "scorecard" | "rubric_score" | "improve_answer" | "generate_report")) {
       if (!lastUserMessage) {
         setError("Answer at least one interview question before using that action.");
         return;
