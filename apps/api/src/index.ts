@@ -16,12 +16,96 @@ import {
   shouldUpdateSummary
 } from "./ai";
 import { HttpError, json, noContent, optionalString, readJson, requireString } from "./http";
-import {
-  buildFirstQuestionInstruction,
-  buildNextQuestionInstruction,
-  formatRubricAsText
-} from "./prompts";
 import type { Env, InterviewMode, RubricResult, SessionType } from "./types";
+
+function buildFirstQuestionInstruction(
+  interviewMode: InterviewMode,
+  companyName: string
+): string {
+  const company = companyName.trim() || "the target company";
+
+  switch (interviewMode) {
+    case "technical":
+      return "Start the mock interview with exactly one practical technical question for the candidate's target role and level. If a CV or job description is provided, tailor it to their tech stack or the role's requirements. Focus on tradeoffs, implementation, or system behaviour. Do not score yet.";
+    case "project_deep_dive":
+      return "Start a project deep-dive interview. Based on the candidate's CV, choose their most relevant project and ask one specific probing question about it — e.g. architecture decisions, why they made a technical choice, or what they would improve. Do not score yet.";
+    case "company_motivation":
+      return `Start the mock interview with exactly one question about the candidate's motivation for applying to ${company}. Ask about their genuine interest in the company, role, or team. Do not score yet.`;
+    case "weakness_gap":
+      return "Start the mock interview with exactly one constructive question about a weakness or potential gap in the candidate's profile relevant to the target role. If a CV is provided, you may reference a possible growth area. Do not score yet.";
+    case "final_simulation":
+      return `Start a final-round interview simulation for ${company}. Ask exactly one challenging senior-level question — this could be a values alignment question, a leadership scenario, a strategic case, or a culture-fit question. Do not score yet.`;
+    case "behavioural":
+    default:
+      return "Start the mock interview with exactly one focused behavioural question (STAR format expected). Base it on the candidate's target role, level, and CV if provided. Do not score yet.";
+  }
+}
+
+function buildNextQuestionInstruction(
+  interviewMode: InterviewMode,
+  companyName: string
+): string {
+  const company = companyName.trim() || "the target company";
+
+  switch (interviewMode) {
+    case "technical":
+      return "Continue the mock interview. Ask exactly one new technical question, building on prior answers or moving to another relevant technical area for the role. Avoid repeating earlier questions.";
+    case "project_deep_dive":
+      return "Continue the project deep-dive. Ask exactly one follow-up question that probes deeper into the candidate's described project — press on trade-offs, edge cases, production concerns, or lessons learned.";
+    case "company_motivation":
+      return `Continue the motivation-focused interview for ${company}. Ask one more question about company fit, culture alignment, or why this specific role appeals to the candidate.`;
+    case "weakness_gap":
+      return "Continue the weakness and gap exploration. Ask exactly one more question about a challenge, growth area, or gap relevant to the candidate's profile and target role.";
+    case "final_simulation":
+      return `Continue the final-round simulation for ${company}. Ask exactly one more challenging final-round question, varying the focus (e.g., move from leadership to values, or from strategy to culture).`;
+    case "behavioural":
+    default:
+      return "Continue the mock interview. Ask exactly one new behavioural follow-up or next-stage question based on the candidate's role, level, CV, and prior answers. Avoid repeating earlier questions.";
+  }
+}
+
+function formatRubricAsText(rubric: {
+  scores: {
+    relevance: number;
+    specificity: number;
+    technicalDepth: number;
+    communicationClarity: number;
+    evidenceExamples: number;
+    overall: number;
+  };
+  strengths: string;
+  weaknesses: string;
+  improvedAnswer: string;
+  followUpQuestion: string;
+}): string {
+  const { scores, strengths, weaknesses, improvedAnswer, followUpQuestion } = rubric;
+
+  const pad = (label: string) => label.padEnd(24, " ");
+
+  return [
+    "📊 Rubric Score",
+    "",
+    `${pad("Relevance")}${scores.relevance}/10`,
+    `${pad("Specificity")}${scores.specificity}/10`,
+    `${pad("Technical depth")}${scores.technicalDepth}/10`,
+    `${pad("Communication")}${scores.communicationClarity}/10`,
+    `${pad("Evidence/examples")}${scores.evidenceExamples}/10`,
+    "─".repeat(34),
+    `${pad("Overall")}${scores.overall}/10`,
+    "",
+    "✅ What was strong",
+    strengths,
+    "",
+    "⚠️ What to improve",
+    weaknesses,
+    "",
+    "📝 Stronger answer",
+    improvedAnswer,
+    "",
+    "❓ Likely follow-up",
+    followUpQuestion
+  ].join("\n");
+}
 
 type CreateSessionBody = {
   clientId?: unknown;
