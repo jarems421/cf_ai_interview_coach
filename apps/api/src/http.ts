@@ -42,6 +42,19 @@ export function requireString(value: unknown, name: string, maxLength = 240) {
   return trimmed;
 }
 
+export function optionalString(value: unknown, name: string, maxLength = 240) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return "";
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length > maxLength) {
+    throw new HttpError(400, `${name} must be ${maxLength} characters or less.`);
+  }
+
+  return trimmed;
+}
+
 export class HttpError extends Error {
   constructor(
     public readonly status: number,

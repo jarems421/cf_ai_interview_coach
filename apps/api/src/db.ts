@@ -1,4 +1,4 @@
-import type { ChatRole, InterviewMode, Message, Session, SessionSummary } from "./types";
+import type { ChatRole, InterviewMode, Message, Session, SessionSummary, SessionType } from "./types";
 
 type SessionRow = {
   id: string;
@@ -6,9 +6,10 @@ type SessionRow = {
   role: string;
   level: string;
   focus: string;
-  companyName: string;
   cvText: string;
   jobDescription: string;
+  companyName: string;
+  sessionType: SessionType;
   interviewMode: InterviewMode;
   createdAt: string;
   updatedAt: string;
@@ -32,29 +33,16 @@ type SummaryRow = {
 
 export async function createSession(
   db: D1Database,
-  input: Pick<
-    Session,
-    "clientId" | "role" | "level" | "focus" | "companyName" | "cvText" | "jobDescription" | "interviewMode"
-  >
+  input: Pick<Session, "clientId" | "role" | "level" | "focus" | "cvText" | "jobDescription" | "companyName" | "sessionType" | "interviewMode">
 ) {
   const id = crypto.randomUUID();
 
   await db
     .prepare(
-      `INSERT INTO sessions (id, client_id, role, level, focus, company_name, cv_text, job_description, interview_mode)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO sessions (id, client_id, role, level, focus, cv_text, job_description, company_name, session_type, interview_mode)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .bind(
-      id,
-      input.clientId,
-      input.role,
-      input.level,
-      input.focus,
-      input.companyName,
-      input.cvText,
-      input.jobDescription,
-      input.interviewMode
-    )
+    .bind(id, input.clientId, input.role, input.level, input.focus, input.cvText, input.jobDescription, input.companyName, input.sessionType, input.interviewMode)
     .run();
 
   await db
@@ -72,8 +60,9 @@ export async function listSessions(db: D1Database, clientId: string) {
   const result = await db
     .prepare(
       `SELECT id, client_id AS clientId, role, level, focus,
-              company_name AS companyName, cv_text AS cvText,
-              job_description AS jobDescription, interview_mode AS interviewMode,
+              cv_text AS cvText, job_description AS jobDescription,
+              company_name AS companyName, session_type AS sessionType,
+              interview_mode AS interviewMode,
               created_at AS createdAt, updated_at AS updatedAt
        FROM sessions
        WHERE client_id = ?
@@ -89,8 +78,9 @@ export async function getSession(db: D1Database, sessionId: string) {
   return await db
     .prepare(
       `SELECT id, client_id AS clientId, role, level, focus,
-              company_name AS companyName, cv_text AS cvText,
-              job_description AS jobDescription, interview_mode AS interviewMode,
+              cv_text AS cvText, job_description AS jobDescription,
+              company_name AS companyName, session_type AS sessionType,
+              interview_mode AS interviewMode,
               created_at AS createdAt, updated_at AS updatedAt
        FROM sessions
        WHERE id = ?`
@@ -197,4 +187,3 @@ export async function deleteSession(db: D1Database, sessionId: string) {
     .bind(sessionId)
     .run();
 }
-

@@ -1,5 +1,12 @@
 export type ChatRole = "user" | "assistant" | "system";
 
+export type SessionType =
+  | "quick_practice"
+  | "full_mock"
+  | "project_defence"
+  | "technical_screen"
+  | "company_specific";
+
 export type InterviewMode =
   | "behavioural"
   | "technical"
@@ -41,9 +48,10 @@ export interface Session {
   role: string;
   level: string;
   focus: string;
-  companyName: string;
   cvText: string;
   jobDescription: string;
+  companyName: string;
+  sessionType: SessionType;
   interviewMode: InterviewMode;
   createdAt: string;
   updatedAt: string;
@@ -64,4 +72,3 @@ export interface SessionSummary {
   improvementAreas: string;
   updatedAt: string;
 }
-

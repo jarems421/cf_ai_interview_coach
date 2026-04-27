@@ -1,4 +1,4 @@
-import type { InterviewMode } from "./types";
+import type { InterviewMode, SessionType } from "./types";
 
 export const COACH_SYSTEM_PROMPT = `You are an AI interview coach for a job candidate.
 
@@ -27,13 +27,31 @@ function truncate(text: string, max: number): string {
   return text.length > max ? text.slice(0, max) + "\n[truncated]" : text;
 }
 
+const SESSION_TYPE_CONTEXT: Record<SessionType, string> = {
+  quick_practice: "Session mode: Quick Practice — one question at a time with instant feedback.",
+  full_mock: "Session mode: Full Mock Interview — simulate a complete 5-8 question interview, then produce a final report.",
+  project_defence: "Session mode: Project Defence — the candidate has chosen a specific project; ask deep, probing questions about it (design decisions, trade-offs, failures, improvements).",
+  technical_screen: "Session mode: Technical Screen — ask practical coding, data structures, system design, or security questions appropriate to the role.",
+  company_specific: "Session mode: Company-specific — tailor all questions to the company culture, tech stack, and role expectations."
+};
+
+const INTERVIEW_MODE_INSTRUCTIONS: Record<InterviewMode, string> = {
+  behavioural: "Focus on STAR-format behavioural questions (Situation, Task, Action, Result). Probe for real examples.",
+  technical: "Focus on technical depth, implementation details, system design, and trade-offs relevant to the role.",
+  project_deep_dive: "Pick one significant project from the candidate's background and systematically probe it: motivation, design, implementation, results, and what they would change.",
+  company_motivation: "Ask why the candidate wants this specific company and role. Probe for genuine knowledge of the company's mission, products, and challenges.",
+  weakness_gap: "Probe for honest self-assessment: weaknesses, gaps in experience, failures, and growth areas. Look for self-awareness and a growth mindset.",
+  final_simulation: "Simulate a full final-round interview: mix behavioural, technical, and culture-fit questions. Maintain a realistic interviewer tone throughout."
+};
+
 export function buildSessionContext(input: {
   role: string;
   level: string;
   focus: string;
-  companyName?: string;
   cvText?: string;
   jobDescription?: string;
+  companyName?: string;
+  sessionType?: SessionType;
   interviewMode?: InterviewMode;
   summary?: string;
   strengths?: string;
@@ -57,6 +75,16 @@ export function buildSessionContext(input: {
       ? `\nJob Description:\n${truncate(input.jobDescription.trim(), JD_MAX_CHARS)}`
       : "";
 
+  const tailoringLines = [
+    input.companyName && `Target company: ${input.companyName}`,
+    input.sessionType && SESSION_TYPE_CONTEXT[input.sessionType],
+    input.interviewMode && `Interview mode: ${INTERVIEW_MODE_INSTRUCTIONS[input.interviewMode]}`
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const tailoringSection = tailoringLines ? `Tailoring context:\n${tailoringLines}\n\n` : "";
+
   return `Candidate target:
 - Role: ${input.role}
 - Level: ${input.level}
@@ -64,7 +92,8 @@ export function buildSessionContext(input: {
 - Interview mode: ${input.interviewMode ?? input.focus}
 - Focus: ${input.focus}
 ${cvSection}${jdSection}
-Memory:
+
+${tailoringSection}Memory:
 ${memory || "No prior coaching memory yet."}`;
 }
 
@@ -208,4 +237,3 @@ Keep each field under 180 characters.
 Transcript:
 ${transcript}`;
 }
-

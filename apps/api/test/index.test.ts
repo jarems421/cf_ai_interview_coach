@@ -64,6 +64,11 @@ function createChatEnv(
     role: "Frontend Engineer",
     level: "Senior",
     focus: "Behavioral",
+    cvText: "",
+    jobDescription: "",
+    companyName: "",
+    sessionType: "quick_practice" as const,
+    interviewMode: "behavioural" as const,
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString()
   };
@@ -180,6 +185,7 @@ describe("worker", () => {
       "",
       "",
       "",
+      "quick_practice",
       "behavioural"
     ]);
   });
@@ -266,5 +272,129 @@ describe("worker", () => {
       reply: expect.stringContaining("at least one candidate answer")
     });
     expect(aiCalls).toHaveLength(0);
+  });
+
+  it("supports tailored question command", async () => {
+    const { env, aiCalls } = createChatEnv();
+    const response = await worker.fetch(
+      new Request("https://example.com/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          clientId: "browser-1",
+          sessionId: "session-1",
+          action: "tailored_question"
+        })
+      }),
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(aiCalls).toHaveLength(1);
+  });
+
+  it("supports rubric score command", async () => {
+    const { env, aiCalls } = createChatEnv();
+    const response = await worker.fetch(
+      new Request("https://example.com/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          clientId: "browser-1",
+          sessionId: "session-1",
+          action: "rubric_score"
+        })
+      }),
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(aiCalls).toHaveLength(1);
+  });
+
+  it("supports generate report command", async () => {
+    const { env, aiCalls } = createChatEnv();
+    const response = await worker.fetch(
+      new Request("https://example.com/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          clientId: "browser-1",
+          sessionId: "session-1",
+          action: "generate_report"
+        })
+      }),
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(aiCalls).toHaveLength(1);
+  });
+
+  it("does not generate report before the candidate answers", async () => {
+    const { env, aiCalls } = createChatEnv([]);
+    const response = await worker.fetch(
+      new Request("https://example.com/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          clientId: "browser-1",
+          sessionId: "session-1",
+          action: "generate_report"
+        })
+      }),
+      env
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      reply: expect.stringContaining("at least one candidate answer")
+    });
+    expect(aiCalls).toHaveLength(0);
+  });
+
+  it("deletes a session", async () => {
+    const { env, calls } = createChatEnv();
+    const response = await worker.fetch(
+      new Request(
+        "https://example.com/api/sessions/session-1?clientId=browser-1",
+        { method: "DELETE" }
+      ),
+      env
+    );
+
+    expect(response.status).toBe(204);
+    expect(calls.some((call) => call.sql.includes("DELETE FROM sessions"))).toBe(true);
+  });
+
+  it("creates session with cv and job description", async () => {
+    const { env, calls } = createEnv();
+    const response = await worker.fetch(
+      new Request("https://example.com/api/sessions", {
+        method: "POST",
+        body: JSON.stringify({
+          clientId: "browser-1",
+          role: "Software Engineer",
+          level: "Senior",
+          focus: "technical",
+          cvText: "5 years experience in Go and distributed systems.",
+          jobDescription: "Build large-scale infrastructure at Cloudflare.",
+          companyName: "Cloudflare",
+          sessionType: "full_mock",
+          interviewMode: "technical"
+        })
+      }),
+      env
+    );
+
+    expect(response.status).toBe(201);
+    expect(calls[0].params).toEqual([
+      expect.any(String),
+      "browser-1",
+      "Software Engineer",
+      "Senior",
+      "technical",
+      "5 years experience in Go and distributed systems.",
+      "Build large-scale infrastructure at Cloudflare.",
+      "Cloudflare",
+      "full_mock",
+      "technical"
+    ]);
   });
 });

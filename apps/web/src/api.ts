@@ -1,4 +1,4 @@
-import type { Message, RubricResult, Session } from "./types";
+import type { InterviewMode, Message, RubricResult, Session, SessionType } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -63,10 +63,11 @@ export async function createSession(input: {
   role: string;
   level: string;
   focus: string;
-  companyName?: string;
   cvText?: string;
   jobDescription?: string;
-  interviewMode?: string;
+  companyName?: string;
+  sessionType?: SessionType;
+  interviewMode?: InterviewMode;
   turnstileToken?: string;
   authToken?: string;
 }) {
@@ -117,6 +118,19 @@ export async function listSessions(clientId: string, authToken?: string) {
   }
 }
 
+export async function deleteSession(sessionId: string, clientId: string) {
+  const params = new URLSearchParams({ clientId });
+  const response = await fetch(`${API_BASE}/api/sessions/${sessionId}?${params}`, {
+    method: "DELETE"
+  });
+
+  if (response.status === 204) {
+    return;
+  }
+
+  return parseResponse<void>(response);
+}
+
 export async function listMessages(sessionId: string, authToken?: string) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
@@ -149,9 +163,12 @@ export async function sendChatMessage(input: {
     | "first_question"
     | "next_question"
     | "technical_question"
+    | "tailored_question"
+    | "rubric_score"
     | "scorecard"
     | "improve_answer"
-    | "rubric";
+    | "rubric"
+    | "generate_report";
   authToken?: string;
 }) {
   const { authToken, ...body } = input;
@@ -179,4 +196,3 @@ export async function sendChatMessage(input: {
     clearTimeout(timeout);
   }
 }
-

@@ -1,16 +1,23 @@
 import {
   Bot,
   BriefcaseBusiness,
-  Building2,
+Building2,
+  ChevronDown,
+  ChevronUp,
   ClipboardCheck,
+  Clock,
   Download,
   FileText,
   Loader2,
+  Mic,
+  MicOff,
   Moon,
   MessageSquareText,
   Plus,
   Send,
   Sun,
+  Star,
+  Trash2,
   WandSparkles,
   Target,
   TerminalSquare,
@@ -21,40 +28,51 @@ import { FormEvent, lazy, Suspense, useEffect, useMemo, useRef, useState } from 
 import type { TurnstileInstance } from "@marsidev/react-turnstile";
 import {
   createSession,
+  deleteSession,
   getClientId,
   listMessages,
   listSessions,
   sendChatMessage
 } from "./api";
-import type { InterviewMode, Message, Session } from "./types";
+import type { InterviewMode, Message, RubricResult, Session, SessionType } from "./types";
 
 type SetupForm = {
   role: string;
   level: string;
   focus: string;
-  companyName: string;
-  interviewMode: InterviewMode;
   cvText: string;
   jobDescription: string;
+  companyName: string;
+  sessionType: SessionType;
+  interviewMode: InterviewMode;
 };
 
 const defaultSetup: SetupForm = {
   role: "Frontend Engineer",
   level: "Mid-level",
   focus: "Behavioral and technical communication",
-  companyName: "",
-  interviewMode: "behavioural",
   cvText: "",
-  jobDescription: ""
+  jobDescription: "",
+  companyName: "",
+  sessionType: "quick_practice",
+  interviewMode: "behavioural"
+};
+
+const SESSION_TYPE_LABELS: Record<SessionType, string> = {
+  quick_practice: "Quick Practice",
+  full_mock: "Full Mock Interview",
+  project_defence: "Project Defence",
+  technical_screen: "Technical Screen",
+  company_specific: "Company-Specific"
 };
 
 const INTERVIEW_MODE_LABELS: Record<InterviewMode, string> = {
   behavioural: "Behavioural",
   technical: "Technical",
-  project_deep_dive: "Project deep-dive",
-  company_motivation: "Company motivation",
-  weakness_gap: "Weakness / gap",
-  final_simulation: "Final simulation"
+  project_deep_dive: "Project Deep-dive",
+  company_motivation: "Company Motivation",
+  weakness_gap: "Weakness / Gap",
+  final_simulation: "Final Simulation"
 };
 
 type Preset = {
@@ -102,6 +120,40 @@ const TurnstileWidget = turnstileSiteKey
       import("./TurnstileWidget").then((m) => ({ default: m.TurnstileWidget }))
     )
   : null;
+
+type SpeechRecognitionResult = {
+  readonly [index: number]: { transcript: string; confidence: number };
+  readonly length: number;
+};
+
+type SpeechRecognitionResultList = {
+  readonly [index: number]: SpeechRecognitionResult;
+  readonly length: number;
+};
+
+type SpeechRecognitionEvent = Event & {
+  readonly results: SpeechRecognitionResultList;
+};
+
+type SpeechRecognitionInstance = {
+  lang: string;
+  interimResults: boolean;
+  maxAlternatives: number;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+};
+
+type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
+
+const SpeechRecognitionAPI: SpeechRecognitionCtor | null =
+  typeof window !== "undefined"
+    ? ((window as unknown as { SpeechRecognition?: SpeechRecognitionCtor }).SpeechRecognition ??
+      (window as unknown as { webkitSpeechRecognition?: SpeechRecognitionCtor }).webkitSpeechRecognition ??
+      null)
+    : null;
 
 function getInitialTheme() {
   const requested = new URLSearchParams(window.location.search).get("theme");
@@ -164,16 +216,23 @@ export function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [setup, setSetup] = useState(defaultSetup);
-  const [showCvFields, setShowCvFields] = useState(false);
+  
   const [draft, setDraft] = useState("");
   const [isLoadingSessions, setIsLoadingSessions] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const turnstileRef = useRef<TurnstileInstance | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+  const [responseTimerSeconds, setResponseTimerSeconds] = useState(0);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerStartedRef = useRef(false);
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? null,
@@ -184,7 +243,31 @@ export function App() {
     [messages]
   );
 
-  // Refresh sessions whenever auth state or clientId changes
+  const hasTailoring = Boolean(
+    activeSession?.cvText || activeSession?.jobDescription
+  );
+
+  const requiresAnswer = new Set([
+    "scorecard",
+    "rubric_score",
+    "improve_answer",
+    "generate_report"
+  ] as const);
+
+  function formatTimer(seconds: number) {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+
+  const timerClass =
+    responseTimerSeconds >= 180
+      ? "responseTimer danger"
+      : responseTimerSeconds >= 120
+      ? "responseTimer warn"
+      : "responseTimer";
+
+// Refresh sessions whenever auth state or clientId changes
   useEffect(() => {
     if (clerkEnabled && isSignedIn === undefined) {
       return; // Wait for Clerk to initialise
@@ -217,6 +300,33 @@ export function App() {
       return undefined;
     }
   }
+
+    useEffect(() => {
+    const hasDraft = draft.trim().length > 0;
+
+    if (hasDraft && !timerStartedRef.current) {
+      timerStartedRef.current = true;
+      setResponseTimerSeconds(0);
+      timerIntervalRef.current = setInterval(() => {
+        setResponseTimerSeconds((s) => s + 1);
+      }, 1000);
+    }
+
+    if (!hasDraft && timerStartedRef.current) {
+      timerStartedRef.current = false;
+      if (timerIntervalRef.current !== null) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
+      setResponseTimerSeconds(0);
+    }
+
+    return () => {
+      if (timerIntervalRef.current !== null) {
+        clearInterval(timerIntervalRef.current);
+      }
+    };
+  }, [draft]);
 
   async function refreshSessions(nextActiveId?: string) {
     setIsLoadingSessions(true);
@@ -312,6 +422,30 @@ export function App() {
     }
   }
 
+  async function handleDeleteSession(sessionId: string) {
+    if (!confirm("Delete this session and all its messages?")) {
+      return;
+    }
+
+    setDeletingSessionId(sessionId);
+    setError(null);
+
+    try {
+      await deleteSession(sessionId, clientId);
+
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(null);
+        setMessages([]);
+      }
+
+      setSessions((current) => current.filter((s) => s.id !== sessionId));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not delete session.");
+    } finally {
+      setDeletingSessionId(null);
+    }
+  }
+
   async function handleSend(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = draft.trim();
@@ -325,15 +459,18 @@ export function App() {
       | "first_question"
       | "next_question"
       | "technical_question"
+      | "tailored_question"
+      | "rubric_score"
       | "scorecard"
       | "improve_answer"
-      | "rubric"
+| "rubric"
+    | "generate_report"
   ) {
     if ((!content && action === "message") || !activeSessionId || isSending) {
       return;
     }
 
-    if (action === "scorecard" || action === "improve_answer" || action === "rubric") {
+    if (requiresAnswer.has(action as "scorecard" | "rubric_score" | "improve_answer" | "generate_report") || action === "rubric") {
       if (!lastUserMessage) {
         setError(
           "Answer at least one interview question before using that action."
@@ -392,14 +529,21 @@ export function App() {
       return;
     }
 
+    const sessionTypeLabel = SESSION_TYPE_LABELS[activeSession.sessionType] ?? activeSession.sessionType;
+    const modeLabel = INTERVIEW_MODE_LABELS[activeSession.interviewMode] ?? activeSession.interviewMode;
+
     const lines = [
       `# Interview Coach Session`,
       "",
       `Role: ${activeSession.role}`,
       `Level: ${activeSession.level}`,
       `Focus: ${activeSession.focus}`,
-      `Mode: ${INTERVIEW_MODE_LABELS[activeSession.interviewMode] ?? activeSession.interviewMode}`,
+      `Session Type: ${sessionTypeLabel}`,
+      `Interview Mode: ${modeLabel}`,
       ...(activeSession.companyName ? [`Company: ${activeSession.companyName}`] : []),
+      `Date: ${new Date().toLocaleDateString()}`,
+      "",
+      "---",
       "",
       ...messages.flatMap((message) => [
         `## ${message.role === "assistant" ? "Coach" : "Candidate"}`,
@@ -408,6 +552,7 @@ export function App() {
         ""
       ])
     ];
+
     const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -415,6 +560,34 @@ export function App() {
     link.download = `interview-coach-${activeSession.id}.md`;
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  function toggleVoiceInput() {
+    if (!SpeechRecognitionAPI) return;
+
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognitionAPI();
+    recognition.lang = "en-US";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      const transcript = event.results[0][0].transcript;
+      setDraft((current) => (current ? `${current} ${transcript}` : transcript));
+      setIsListening(false);
+    };
+
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
+
+    recognitionRef.current = recognition;
+    setIsListening(true);
+    recognition.start();
   }
 
   const hasAssistantQuestion = messages.some(
@@ -520,6 +693,48 @@ export function App() {
           <label>
             <span>
               <Target size={16} aria-hidden="true" />
+              Focus
+            </span>
+            <input
+              value={setup.focus}
+              onChange={(event) =>
+                setSetup((current) => ({
+                  ...current,
+                  focus: event.target.value
+                }))
+              }
+              maxLength={160}
+              required
+            />
+          </label>
+
+          <label>
+            <span>
+              <TerminalSquare size={16} aria-hidden="true" />
+              Session type
+            </span>
+            <select
+              value={setup.sessionType}
+              onChange={(event) =>
+                setSetup((current) => ({
+                  ...current,
+                  sessionType: event.target.value as SessionType
+                }))
+              }
+            >
+              {(Object.entries(SESSION_TYPE_LABELS) as [SessionType, string][]).map(
+                ([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                )
+              )}
+            </select>
+          </label>
+
+          <label>
+            <span>
+              <ClipboardCheck size={16} aria-hidden="true" />
               Interview mode
             </span>
             <select
@@ -541,56 +756,41 @@ export function App() {
             </select>
           </label>
 
-          <label>
-            <span>
-              <Target size={16} aria-hidden="true" />
-              Focus
-            </span>
-            <input
-              value={setup.focus}
-              onChange={(event) =>
-                setSetup((current) => ({
-                  ...current,
-                  focus: event.target.value
-                }))
-              }
-              maxLength={160}
-              required
-            />
-          </label>
-
-          <label>
-            <span>
-              <Building2 size={16} aria-hidden="true" />
-              Company (optional)
-            </span>
-            <input
-              value={setup.companyName}
-              onChange={(event) =>
-                setSetup((current) => ({
-                  ...current,
-                  companyName: event.target.value
-                }))
-              }
-              placeholder="e.g. Cloudflare"
-              maxLength={120}
-            />
-          </label>
-
           <button
-            className="cvToggle"
+            className="advancedToggle"
             type="button"
-            onClick={() => setShowCvFields((v) => !v)}
+            onClick={() => setShowAdvanced((v) => !v)}
+            aria-expanded={showAdvanced}
           >
-            <FileText size={15} aria-hidden="true" />
-            {showCvFields ? "Hide CV & JD" : "Add CV & Job Description"}
+            {showAdvanced ? (
+              <ChevronUp size={15} aria-hidden="true" />
+            ) : (
+              <ChevronDown size={15} aria-hidden="true" />
+            )}
+            {showAdvanced ? "Hide" : "Add"} CV &amp; job description
           </button>
 
-          {showCvFields && (
+          {showAdvanced && (
             <>
               <label>
-                <span>CV / Resume (paste text)</span>
+                <span>Company name (optional)</span>
+                <input
+                  value={setup.companyName}
+                  onChange={(event) =>
+                    setSetup((current) => ({
+                      ...current,
+                      companyName: event.target.value
+                    }))
+                  }
+                  placeholder="e.g. Cloudflare"
+                  maxLength={240}
+                />
+              </label>
+
+              <label>
+                <span>Your CV / resume (optional)</span>
                 <textarea
+                  className="setupTextarea"
                   value={setup.cvText}
                   onChange={(event) =>
                     setSetup((current) => ({
@@ -598,15 +798,16 @@ export function App() {
                       cvText: event.target.value
                     }))
                   }
-                  placeholder="Paste your CV or résumé here..."
+                  placeholder="Paste your CV or key experience here..."
+                  maxLength={8000}
                   rows={5}
-                  maxLength={6000}
                 />
               </label>
 
               <label>
-                <span>Job Description (paste text)</span>
+                <span>Job description (optional)</span>
                 <textarea
+                  className="setupTextarea"
                   value={setup.jobDescription}
                   onChange={(event) =>
                     setSetup((current) => ({
@@ -615,8 +816,8 @@ export function App() {
                     }))
                   }
                   placeholder="Paste the job description here..."
-                  rows={5}
                   maxLength={4000}
+                  rows={5}
                 />
               </label>
             </>
@@ -640,11 +841,7 @@ export function App() {
             type="submit"
             disabled={isCreating || (!!turnstileSiteKey && !turnstileToken)}
           >
-            {isCreating ? (
-              <Loader2 className="spin" size={18} />
-            ) : (
-              <Plus size={18} />
-            )}
+            {isCreating ? <Loader2 className="spin" size={18} /> : <Plus size={18} />}
             New session
           </button>
         </form>
@@ -658,20 +855,44 @@ export function App() {
           {isLoadingSessions ? (
             <p className="muted">Loading sessions...</p>
           ) : sessions.length === 0 ? (
-            <p className="muted">No sessions yet.</p>
+            <p className="muted">No sessions yet. Create one above to start practicing.</p>
           ) : (
             sessions.map((session) => (
-              <button
-                className={`sessionButton ${session.id === activeSessionId ? "active" : ""}`}
+              <div
+                className={`sessionItem ${session.id === activeSessionId ? "active" : ""}`}
                 key={session.id}
-                onClick={() => void loadMessages(session.id)}
-                type="button"
               >
-                <strong>{session.role}</strong>
-                <span>
-                  {session.level} — {INTERVIEW_MODE_LABELS[session.interviewMode] ?? session.interviewMode}
-                </span>
-              </button>
+                <button
+                  className="sessionButton"
+                  onClick={() => void loadMessages(session.id)}
+                  type="button"
+                >
+                  <strong>{session.role}</strong>
+                  <span>
+                    {SESSION_TYPE_LABELS[session.sessionType] ?? session.sessionType}
+                  </span>
+                  <span>
+                    {session.level} · {INTERVIEW_MODE_LABELS[session.interviewMode] ?? session.interviewMode}
+                  </span>
+                  {session.companyName && (
+                    <span className="sessionCompany">{session.companyName}</span>
+                  )}
+                </button>
+                <button
+                  className="sessionDeleteButton"
+                  type="button"
+                  onClick={() => void handleDeleteSession(session.id)}
+                  disabled={deletingSessionId === session.id}
+                  aria-label="Delete session"
+                  title="Delete session"
+                >
+                  {deletingSessionId === session.id ? (
+                    <Loader2 className="spin" size={14} aria-hidden="true" />
+                  ) : (
+                    <Trash2 size={14} aria-hidden="true" />
+                  )}
+                </button>
+              </div>
             ))
           )}
         </div>
@@ -682,7 +903,7 @@ export function App() {
           <div>
             <p>
               {activeSession
-                ? `${INTERVIEW_MODE_LABELS[activeSession.interviewMode] ?? activeSession.interviewMode}${activeSession.companyName ? ` — ${activeSession.companyName}` : ""}`
+                ? `${SESSION_TYPE_LABELS[activeSession.sessionType] ?? activeSession.sessionType} · ${INTERVIEW_MODE_LABELS[activeSession.interviewMode] ?? activeSession.interviewMode}${activeSession.companyName ? ` · ${activeSession.companyName}` : ""}`
                 : "Start a session"}
             </p>
             <h2>
@@ -718,8 +939,10 @@ export function App() {
               </h3>
               <p>
                 {activeSession
-                  ? "Use the action buttons below to get your first question or type your own answer."
-                  : "Pick a quick-start preset on the left or fill in your role and focus, then click \"New session\"."}
+                  ? hasTailoring
+                    ? "CV and job description loaded — use \"Tailored question\" for personalised questions."
+                    : "The coach will keep memory for this browser and adapt feedback as the interview develops."
+                  : "Choose your role, session type, and optionally add your CV and job description for personalised questions."}
               </p>
             </div>
           ) : (
@@ -769,6 +992,24 @@ export function App() {
             <TerminalSquare size={17} aria-hidden="true" />
             Technical question
           </button>
+          {hasTailoring && (
+            <button
+              type="button"
+              onClick={() => void sendContent("", "tailored_question")}
+              disabled={!activeSession || isSending}
+            >
+              <FileText size={17} aria-hidden="true" />
+              Tailored question
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void sendContent("", "rubric_score")}
+            disabled={!activeSession || isSending || !lastUserMessage}
+          >
+            <Star size={17} aria-hidden="true" />
+            Rubric score
+          </button>
           <button
             type="button"
             onClick={() => void sendContent("", "scorecard")}
@@ -792,11 +1033,11 @@ export function App() {
           </button>
           <button
             type="button"
-            onClick={() => void sendContent("", "rubric")}
+            onClick={() => void sendContent("", "generate_report")}
             disabled={!activeSession || isSending || !lastUserMessage}
           >
-            <ClipboardCheck size={17} aria-hidden="true" />
-            Rubric score
+            <FileText size={17} aria-hidden="true" />
+            Final report
           </button>
           <button
             type="button"
@@ -809,6 +1050,12 @@ export function App() {
         </div>
 
         <form className="composer" onSubmit={handleSend}>
+          {responseTimerSeconds > 0 && (
+            <div className={timerClass} aria-label="Response timer" aria-live="off">
+              <Clock size={13} aria-hidden="true" />
+              {formatTimer(responseTimerSeconds)}
+            </div>
+          )}
           <textarea
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
@@ -821,19 +1068,33 @@ export function App() {
             rows={3}
             maxLength={2000}
           />
-          <button
-            className="sendButton"
-            type="submit"
-            disabled={!activeSession || !draft.trim() || isSending}
-            aria-label="Send message"
-            title="Send message"
-          >
-            {isSending ? (
-              <Loader2 className="spin" size={20} />
-            ) : (
-              <Send size={20} />
+          <div className="composerActions">
+            {SpeechRecognitionAPI && (
+              <button
+                className={`voiceButton ${isListening ? "listening" : ""}`}
+                type="button"
+                onClick={toggleVoiceInput}
+                disabled={!activeSession || isSending}
+                aria-label={isListening ? "Stop recording" : "Start voice input"}
+                title={isListening ? "Stop recording" : "Start voice input"}
+              >
+                {isListening ? (
+                  <MicOff size={18} aria-hidden="true" />
+                ) : (
+                  <Mic size={18} aria-hidden="true" />
+                )}
+              </button>
             )}
-          </button>
+            <button
+              className="sendButton"
+              type="submit"
+              disabled={!activeSession || !draft.trim() || isSending}
+              aria-label="Send message"
+              title="Send message"
+            >
+              {isSending ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
+            </button>
+          </div>
         </form>
       </section>
     </main>

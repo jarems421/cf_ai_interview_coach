@@ -49,10 +49,11 @@ export async function generateCoachReply(input: {
         role: input.session.role,
         level: input.session.level,
         focus: input.session.focus,
-        companyName: input.session.companyName,
         cvText: input.session.cvText,
         jobDescription: input.session.jobDescription,
-        interviewMode: input.session.interviewMode as InterviewMode,
+        companyName: input.session.companyName,
+        sessionType: input.session.sessionType,
+        interviewMode: input.session.interviewMode,
         summary: input.summary?.summary,
         strengths: input.summary?.strengths,
         improvementAreas: input.summary?.improvementAreas
@@ -202,4 +203,3 @@ export function shouldUpdateSummary(messages: Message[]) {
   const userTurns = messages.filter((message) => message.role === "user").length;
   return userTurns > 0 && userTurns % 4 === 0;
 }
-
