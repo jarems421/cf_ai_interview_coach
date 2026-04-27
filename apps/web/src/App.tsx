@@ -12,7 +12,8 @@ import {
   WandSparkles,
   Target,
   TerminalSquare,
-  UserRound
+  UserRound,
+  Zap
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -36,7 +37,40 @@ const defaultSetup: SetupForm = {
   focus: "Behavioral and technical communication"
 };
 
+type Preset = {
+  label: string;
+  role: string;
+  level: string;
+  focus: string;
+};
+
+const PRESETS: Preset[] = [
+  {
+    label: "Behavioral Interview",
+    role: "Software Engineer",
+    level: "Mid-level",
+    focus: "Behavioral: leadership, teamwork, and conflict resolution"
+  },
+  {
+    label: "System Design",
+    role: "Senior Software Engineer",
+    level: "Senior",
+    focus: "System design: scalability, reliability, and trade-offs"
+  },
+  {
+    label: "Frontend Coding",
+    role: "Frontend Engineer",
+    level: "Mid-level",
+    focus: "Frontend: JavaScript, React, CSS, and browser APIs"
+  }
+];
+
 const themeStorageKey = "cf_ai_interview_coach_theme";
+
+const clerkEnabled = !!import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
+const turnstileSiteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY as
+  | string
+  | undefined;
 
 function getInitialTheme() {
   const requested = new URLSearchParams(window.location.search).get("theme");
@@ -56,8 +90,44 @@ function getInitialTheme() {
     : "light";
 }
 
+// ── Clerk (optional) ─────────────────────────────────────────────────────────
+
+type AuthState = {
+  isSignedIn: boolean | undefined;
+  userId: string | null | undefined;
+  getToken: () => Promise<string | null>;
+};
+
+function useAuthState(): AuthState {
+  // Inline hook: reads from Clerk if available, otherwise returns anonymous state
+  if (clerkEnabled) {
+    try {
+      // We import Clerk conditionally at module level (see ClerkGate)
+      // Here we call through a stable hook reference stored on the window
+      const hook = (window as Record<string, unknown>)
+        .__clerkUseAuth as (() => AuthState) | undefined;
+      if (hook) {
+        return hook();
+      }
+    } catch {
+      // Clerk not ready yet
+    }
+  }
+  return {
+    isSignedIn: undefined,
+    userId: null,
+    getToken: () => Promise.resolve(null)
+  };
+}
+
 export function App() {
-  const [clientId] = useState(getClientId);
+  const { isSignedIn, getToken, userId } = useAuthState();
+
+  // Determine client ID: use Clerk user ID when authenticated, otherwise localStorage
+  const localClientId = useMemo(() => getClientId(), []);
+  const clientId =
+    clerkEnabled && userId ? userId : localClientId;
+
   const [theme, setTheme] = useState<"dark" | "light">(getInitialTheme);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -69,6 +139,8 @@ export function App() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const turnstileRef = useRef<{ reset: () => void } | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
 
   const activeSession = useMemo(
@@ -80,9 +152,18 @@ export function App() {
     [messages]
   );
 
+  // Refresh sessions whenever auth state or clientId changes
   useEffect(() => {
+    if (clerkEnabled && isSignedIn === undefined) {
+      return; // Wait for Clerk to initialise
+    }
+    if (clerkEnabled && !isSignedIn) {
+      setIsLoadingSessions(false);
+      return; // Don't fetch when not signed in
+    }
     void refreshSessions();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, isSignedIn]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -96,21 +177,34 @@ export function App() {
     });
   }, [messages, isSending]);
 
+  async function getAuthToken() {
+    if (!clerkEnabled || !isSignedIn) return undefined;
+    try {
+      return (await getToken()) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   async function refreshSessions(nextActiveId?: string) {
     setIsLoadingSessions(true);
     setError(null);
 
     try {
-      const result = await listSessions(clientId);
+      const authToken = await getAuthToken();
+      const result = await listSessions(clientId, authToken);
       setSessions(result.sessions);
 
-      const preferredId = nextActiveId ?? activeSessionId ?? result.sessions[0]?.id;
+      const preferredId =
+        nextActiveId ?? activeSessionId ?? result.sessions[0]?.id;
       if (preferredId) {
         setActiveSessionId(preferredId);
         await loadMessages(preferredId);
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load sessions.");
+      setError(
+        caught instanceof Error ? caught.message : "Could not load sessions."
+      );
     } finally {
       setIsLoadingSessions(false);
     }
@@ -121,27 +215,54 @@ export function App() {
     setError(null);
 
     try {
-      const result = await listMessages(sessionId);
+      const authToken = await getAuthToken();
+      const result = await listMessages(sessionId, authToken);
       setMessages(result.messages);
       setActiveSessionId(sessionId);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load messages.");
+      setError(
+        caught instanceof Error ? caught.message : "Could not load messages."
+      );
     } finally {
       setIsLoadingMessages(false);
     }
   }
 
+  function applyPreset(preset: Preset) {
+    setSetup({ role: preset.role, level: preset.level, focus: preset.focus });
+  }
+
   async function handleCreateSession(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (turnstileSiteKey && !turnstileToken) {
+      setError(
+        "Please complete the bot verification before creating a session."
+      );
+      return;
+    }
+
     setIsCreating(true);
     setError(null);
 
     try {
-      const result = await createSession({ clientId, ...setup });
+      const authToken = await getAuthToken();
+      const result = await createSession({
+        clientId,
+        ...setup,
+        ...(turnstileToken ? { turnstileToken } : {}),
+        authToken
+      });
       await refreshSessions(result.sessionId);
       setMessages([]);
+      setTurnstileToken(null);
+      turnstileRef.current?.reset();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not create session.");
+      setError(
+        caught instanceof Error ? caught.message : "Could not create session."
+      );
+      setTurnstileToken(null);
+      turnstileRef.current?.reset();
     } finally {
       setIsCreating(false);
     }
@@ -150,7 +271,6 @@ export function App() {
   async function handleSend(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = draft.trim();
-
     await sendContent(content, "message");
   }
 
@@ -170,7 +290,9 @@ export function App() {
 
     if (action === "scorecard" || action === "improve_answer") {
       if (!lastUserMessage) {
-        setError("Answer at least one interview question before using that action.");
+        setError(
+          "Answer at least one interview question before using that action."
+        );
         return;
       }
     }
@@ -191,11 +313,13 @@ export function App() {
     setError(null);
 
     try {
+      const authToken = await getAuthToken();
       const result = await sendChatMessage({
         clientId,
         sessionId: activeSessionId,
         message: content,
-        action
+        action,
+        authToken
       });
 
       setMessages((current) => [
@@ -210,7 +334,9 @@ export function App() {
       ]);
       void refreshSessions(activeSessionId);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not send message.");
+      setError(
+        caught instanceof Error ? caught.message : "Could not send message."
+      );
     } finally {
       setIsSending(false);
     }
@@ -261,20 +387,47 @@ export function App() {
           </div>
         </div>
 
-        <button
-          className="themeToggle"
-          type="button"
-          onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-          aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-          title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-        >
-          {theme === "dark" ? (
-            <Sun size={18} aria-hidden="true" />
-          ) : (
-            <Moon size={18} aria-hidden="true" />
-          )}
-          <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>
-        </button>
+        <div className="sidebarTop">
+          <button
+            className="themeToggle"
+            type="button"
+            onClick={() =>
+              setTheme((current) => (current === "dark" ? "light" : "dark"))
+            }
+            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+            title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+          >
+            {theme === "dark" ? (
+              <Sun size={18} aria-hidden="true" />
+            ) : (
+              <Moon size={18} aria-hidden="true" />
+            )}
+            <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>
+          </button>
+
+          {/* Clerk UserButton rendered by the ClerkGate wrapper */}
+          <div id="clerk-user-button-portal" className="userButtonWrapper" />
+        </div>
+
+        <div className="presetsSection">
+          <div className="sessionListHeader">
+            <Zap size={17} aria-hidden="true" />
+            <span>Quick start</span>
+          </div>
+          <div className="presetList">
+            {PRESETS.map((preset) => (
+              <button
+                key={preset.label}
+                className="presetButton"
+                type="button"
+                onClick={() => applyPreset(preset)}
+                title={`${preset.role} — ${preset.focus}`}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <form className="setupPanel" onSubmit={handleCreateSession}>
           <label>
@@ -285,7 +438,10 @@ export function App() {
             <input
               value={setup.role}
               onChange={(event) =>
-                setSetup((current) => ({ ...current, role: event.target.value }))
+                setSetup((current) => ({
+                  ...current,
+                  role: event.target.value
+                }))
               }
               maxLength={120}
               required
@@ -300,7 +456,10 @@ export function App() {
             <select
               value={setup.level}
               onChange={(event) =>
-                setSetup((current) => ({ ...current, level: event.target.value }))
+                setSetup((current) => ({
+                  ...current,
+                  level: event.target.value
+                }))
               }
             >
               <option>Entry-level</option>
@@ -319,15 +478,31 @@ export function App() {
             <input
               value={setup.focus}
               onChange={(event) =>
-                setSetup((current) => ({ ...current, focus: event.target.value }))
+                setSetup((current) => ({
+                  ...current,
+                  focus: event.target.value
+                }))
               }
               maxLength={160}
               required
             />
           </label>
 
-          <button className="primaryButton" type="submit" disabled={isCreating}>
-            {isCreating ? <Loader2 className="spin" size={18} /> : <Plus size={18} />}
+          {/* Turnstile widget rendered by the TurnstileGate wrapper */}
+          {turnstileSiteKey && (
+            <div id="turnstile-portal" className="turnstileWrapper" />
+          )}
+
+          <button
+            className="primaryButton"
+            type="submit"
+            disabled={isCreating || (!!turnstileSiteKey && !turnstileToken)}
+          >
+            {isCreating ? (
+              <Loader2 className="spin" size={18} />
+            ) : (
+              <Plus size={18} />
+            )}
             New session
           </button>
         </form>
@@ -375,7 +550,11 @@ export function App() {
           </div>
         </header>
 
-        {error && <div className="errorBanner">{error}</div>}
+        {error && (
+          <div className="errorBanner" role="alert">
+            {error}
+          </div>
+        )}
 
         <div className="transcript" ref={transcriptRef}>
           {isLoadingMessages ? (
@@ -392,8 +571,9 @@ export function App() {
                   : "Create a session to start your mock interview."}
               </h3>
               <p>
-                The coach will keep memory for this browser and adapt feedback as
-                the interview develops.
+                {activeSession
+                  ? "Use the action buttons below to get your first question or type your own answer."
+                  : "Pick a quick-start preset on the left or fill in your role and focus, then click \"New session\"."}
               </p>
             </div>
           ) : (
@@ -445,9 +625,7 @@ export function App() {
           </button>
           <button
             type="button"
-            onClick={() =>
-              void sendContent("", "scorecard")
-            }
+            onClick={() => void sendContent("", "scorecard")}
             disabled={!activeSession || isSending || !lastUserMessage}
           >
             <ClipboardCheck size={17} aria-hidden="true" />
@@ -496,7 +674,11 @@ export function App() {
             aria-label="Send message"
             title="Send message"
           >
-            {isSending ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
+            {isSending ? (
+              <Loader2 className="spin" size={20} />
+            ) : (
+              <Send size={20} />
+            )}
           </button>
         </form>
       </section>

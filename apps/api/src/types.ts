@@ -3,6 +3,11 @@ export type ChatRole = "user" | "assistant" | "system";
 export interface Env {
   AI: Ai;
   DB: D1Database;
+  CLERK_SECRET_KEY?: string;
+  TURNSTILE_SECRET_KEY?: string;
+  RATE_LIMITER?: {
+    limit: (options: { key: string }) => Promise<{ success: boolean }>;
+  };
 }
 
 export interface Session {

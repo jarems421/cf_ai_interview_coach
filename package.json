@@ -17,6 +17,9 @@
     "deploy:web": "npm run build:web && wrangler pages deploy apps/web/dist --project-name cf-ai-interview-coach --branch master"
   },
   "dependencies": {
+    "@clerk/backend": "^3.4.1",
+    "@clerk/react": "^6.4.5",
+    "@marsidev/react-turnstile": "^1.5.1",
     "@vitejs/plugin-react": "^5.1.1",
     "lucide-react": "^0.561.0",
     "react": "^19.2.1",

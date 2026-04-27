@@ -21,6 +21,7 @@ type CreateSessionBody = {
   role?: unknown;
   level?: unknown;
   focus?: unknown;
+  turnstileToken?: unknown;
 };
 
 type ChatBody = {
@@ -76,6 +77,54 @@ function buildActionInstruction(action: ChatAction, message: string) {
   return message;
 }
 
+async function getAuthenticatedUserId(
+  request: Request,
+  env: Env
+): Promise<string | null> {
+  if (!env.CLERK_SECRET_KEY) {
+    return null;
+  }
+
+  const authHeader = request.headers.get("Authorization");
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return null;
+  }
+
+  const token = authHeader.slice(7);
+
+  try {
+    const { verifyToken } = await import("@clerk/backend");
+    const payload = await verifyToken(token, {
+      secretKey: env.CLERK_SECRET_KEY
+    });
+    return (payload.sub as string | undefined) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function verifyTurnstileToken(
+  token: string,
+  secretKey: string
+): Promise<boolean> {
+  const form = new FormData();
+  form.append("secret", secretKey);
+  form.append("response", token);
+
+  const response = await fetch(
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    { method: "POST", body: form }
+  );
+
+  if (!response.ok) {
+    return false;
+  }
+
+  const result = (await response.json()) as { success: boolean };
+  return result.success === true;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method === "OPTIONS") {
@@ -89,12 +138,60 @@ export default {
         return json({ ok: true, service: "cf_ai_interview_coach" });
       }
 
+      // Apply rate limiting to API endpoints when configured
+      if (env.RATE_LIMITER && url.pathname.startsWith("/api/")) {
+        const ip =
+          request.headers.get("CF-Connecting-IP") ??
+          request.headers.get("X-Forwarded-For") ??
+          "unknown";
+        const { success } = await env.RATE_LIMITER.limit({ key: ip });
+
+        if (!success) {
+          throw new HttpError(
+            429,
+            "Too many requests. Please wait a moment and try again."
+          );
+        }
+      }
+
       if (url.pathname === "/api/sessions" && request.method === "POST") {
         const body = await readJson<CreateSessionBody>(request);
         const clientId = requireString(body.clientId, "clientId");
         const role = requireString(body.role, "role");
         const level = requireString(body.level, "level");
         const focus = requireString(body.focus, "focus");
+
+        // Verify Turnstile token when configured
+        if (env.TURNSTILE_SECRET_KEY) {
+          const turnstileToken = requireString(
+            body.turnstileToken,
+            "turnstileToken"
+          );
+          const valid = await verifyTurnstileToken(
+            turnstileToken,
+            env.TURNSTILE_SECRET_KEY
+          );
+
+          if (!valid) {
+            throw new HttpError(
+              403,
+              "Bot check failed. Please complete the verification and try again."
+            );
+          }
+        }
+
+        // When Clerk is configured, ensure the clientId matches the authenticated user
+        if (env.CLERK_SECRET_KEY) {
+          const userId = await getAuthenticatedUserId(request, env);
+
+          if (!userId) {
+            throw new HttpError(401, "Authentication required.");
+          }
+
+          if (userId !== clientId) {
+            throw new HttpError(403, "Forbidden.");
+          }
+        }
 
         const sessionId = await createSession(env.DB, {
           clientId,
@@ -108,6 +205,20 @@ export default {
 
       if (url.pathname === "/api/sessions" && request.method === "GET") {
         const clientId = requireString(url.searchParams.get("clientId"), "clientId");
+
+        // When Clerk is configured, ensure the clientId matches the authenticated user
+        if (env.CLERK_SECRET_KEY) {
+          const userId = await getAuthenticatedUserId(request, env);
+
+          if (!userId) {
+            throw new HttpError(401, "Authentication required.");
+          }
+
+          if (userId !== clientId) {
+            throw new HttpError(403, "Forbidden.");
+          }
+        }
+
         return json({ sessions: await listSessions(env.DB, clientId) });
       }
 
@@ -121,6 +232,19 @@ export default {
 
         if (!session) {
           throw new HttpError(404, "Session not found.");
+        }
+
+        // When Clerk is configured, ensure the session belongs to the authenticated user
+        if (env.CLERK_SECRET_KEY) {
+          const userId = await getAuthenticatedUserId(request, env);
+
+          if (!userId) {
+            throw new HttpError(401, "Authentication required.");
+          }
+
+          if (userId !== session.clientId) {
+            throw new HttpError(403, "Forbidden.");
+          }
         }
 
         return json({ messages: await listMessages(env.DB, sessionId) });
@@ -139,6 +263,19 @@ export default {
 
         if (!session || session.clientId !== clientId) {
           throw new HttpError(404, "Session not found.");
+        }
+
+        // When Clerk is configured, ensure the session belongs to the authenticated user
+        if (env.CLERK_SECRET_KEY) {
+          const userId = await getAuthenticatedUserId(request, env);
+
+          if (!userId) {
+            throw new HttpError(401, "Authentication required.");
+          }
+
+          if (userId !== clientId) {
+            throw new HttpError(403, "Forbidden.");
+          }
         }
 
         if (action === "message") {

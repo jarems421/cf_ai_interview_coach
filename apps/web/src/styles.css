@@ -134,6 +134,7 @@ body {
 
 .themeToggle {
   min-height: 42px;
+  flex: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -144,6 +145,69 @@ body {
   background: var(--panel);
   cursor: pointer;
   font-weight: 800;
+}
+
+.sidebarTop {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.userButtonWrapper {
+  flex: 0 0 auto;
+}
+
+.presetsSection {
+  display: grid;
+  gap: 10px;
+}
+
+.presetList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.presetButton {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--accent);
+  border-radius: 20px;
+  padding: 0 14px;
+  color: var(--accent);
+  background: var(--surface-wash);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.presetButton:hover {
+  background: var(--selected);
+}
+
+.turnstileWrapper {
+  display: flex;
+  justify-content: center;
+}
+
+.authShell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(120deg, var(--surface-wash), transparent 34%),
+    var(--surface);
+}
+
+.authCard {
+  width: min(480px, calc(100vw - 32px));
+  padding: 40px 32px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: var(--panel);
 }
 
 .setupPanel {
