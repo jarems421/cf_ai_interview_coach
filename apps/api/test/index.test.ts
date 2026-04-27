@@ -176,7 +176,11 @@ describe("worker", () => {
       "browser-1",
       "Frontend Engineer",
       "Senior",
-      "behavioral"
+      "behavioral",
+      "",
+      "",
+      "",
+      "behavioural"
     ]);
   });
 

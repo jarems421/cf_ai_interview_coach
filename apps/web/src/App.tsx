@@ -1,8 +1,10 @@
 import {
   Bot,
   BriefcaseBusiness,
+  Building2,
   ClipboardCheck,
   Download,
+  FileText,
   Loader2,
   Moon,
   MessageSquareText,
@@ -15,7 +17,8 @@ import {
   UserRound,
   Zap
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import type { TurnstileInstance } from "@marsidev/react-turnstile";
 import {
   createSession,
   getClientId,
@@ -23,18 +26,35 @@ import {
   listSessions,
   sendChatMessage
 } from "./api";
-import type { Message, Session } from "./types";
+import type { InterviewMode, Message, Session } from "./types";
 
 type SetupForm = {
   role: string;
   level: string;
   focus: string;
+  companyName: string;
+  interviewMode: InterviewMode;
+  cvText: string;
+  jobDescription: string;
 };
 
 const defaultSetup: SetupForm = {
   role: "Frontend Engineer",
   level: "Mid-level",
-  focus: "Behavioral and technical communication"
+  focus: "Behavioral and technical communication",
+  companyName: "",
+  interviewMode: "behavioural",
+  cvText: "",
+  jobDescription: ""
+};
+
+const INTERVIEW_MODE_LABELS: Record<InterviewMode, string> = {
+  behavioural: "Behavioural",
+  technical: "Technical",
+  project_deep_dive: "Project deep-dive",
+  company_motivation: "Company motivation",
+  weakness_gap: "Weakness / gap",
+  final_simulation: "Final simulation"
 };
 
 type Preset = {
@@ -42,26 +62,30 @@ type Preset = {
   role: string;
   level: string;
   focus: string;
+  interviewMode: InterviewMode;
 };
 
 const PRESETS: Preset[] = [
   {
-    label: "Behavioral Interview",
+    label: "Behavioural",
     role: "Software Engineer",
     level: "Mid-level",
-    focus: "Behavioral: leadership, teamwork, and conflict resolution"
+    focus: "Leadership, teamwork, and conflict resolution",
+    interviewMode: "behavioural"
   },
   {
     label: "System Design",
     role: "Senior Software Engineer",
     level: "Senior",
-    focus: "System design: scalability, reliability, and trade-offs"
+    focus: "System design: scalability, reliability, and trade-offs",
+    interviewMode: "technical"
   },
   {
     label: "Frontend Coding",
     role: "Frontend Engineer",
     level: "Mid-level",
-    focus: "Frontend: JavaScript, React, CSS, and browser APIs"
+    focus: "JavaScript, React, CSS, and browser APIs",
+    interviewMode: "technical"
   }
 ];
 
@@ -71,6 +95,13 @@ const clerkEnabled = !!import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 const turnstileSiteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY as
   | string
   | undefined;
+
+// Lazily import TurnstileWidget only when a site key is configured
+const TurnstileWidget = turnstileSiteKey
+  ? lazy(() =>
+      import("./TurnstileWidget").then((m) => ({ default: m.TurnstileWidget }))
+    )
+  : null;
 
 function getInitialTheme() {
   const requested = new URLSearchParams(window.location.search).get("theme");
@@ -104,7 +135,7 @@ function useAuthState(): AuthState {
     try {
       // We import Clerk conditionally at module level (see ClerkGate)
       // Here we call through a stable hook reference stored on the window
-      const hook = (window as Record<string, unknown>)
+      const hook = (window as unknown as Record<string, unknown>)
         .__clerkUseAuth as (() => AuthState) | undefined;
       if (hook) {
         return hook();
@@ -133,6 +164,7 @@ export function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [setup, setSetup] = useState(defaultSetup);
+  const [showCvFields, setShowCvFields] = useState(false);
   const [draft, setDraft] = useState("");
   const [isLoadingSessions, setIsLoadingSessions] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
@@ -140,7 +172,7 @@ export function App() {
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
-  const turnstileRef = useRef<{ reset: () => void } | null>(null);
+  const turnstileRef = useRef<TurnstileInstance | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
 
   const activeSession = useMemo(
@@ -229,7 +261,13 @@ export function App() {
   }
 
   function applyPreset(preset: Preset) {
-    setSetup({ role: preset.role, level: preset.level, focus: preset.focus });
+    setSetup((current) => ({
+      ...current,
+      role: preset.role,
+      level: preset.level,
+      focus: preset.focus,
+      interviewMode: preset.interviewMode
+    }));
   }
 
   async function handleCreateSession(event: FormEvent<HTMLFormElement>) {
@@ -249,7 +287,13 @@ export function App() {
       const authToken = await getAuthToken();
       const result = await createSession({
         clientId,
-        ...setup,
+        role: setup.role,
+        level: setup.level,
+        focus: setup.focus,
+        companyName: setup.companyName,
+        cvText: setup.cvText,
+        jobDescription: setup.jobDescription,
+        interviewMode: setup.interviewMode,
         ...(turnstileToken ? { turnstileToken } : {}),
         authToken
       });
@@ -283,12 +327,13 @@ export function App() {
       | "technical_question"
       | "scorecard"
       | "improve_answer"
+      | "rubric"
   ) {
     if ((!content && action === "message") || !activeSessionId || isSending) {
       return;
     }
 
-    if (action === "scorecard" || action === "improve_answer") {
+    if (action === "scorecard" || action === "improve_answer" || action === "rubric") {
       if (!lastUserMessage) {
         setError(
           "Answer at least one interview question before using that action."
@@ -353,6 +398,8 @@ export function App() {
       `Role: ${activeSession.role}`,
       `Level: ${activeSession.level}`,
       `Focus: ${activeSession.focus}`,
+      `Mode: ${INTERVIEW_MODE_LABELS[activeSession.interviewMode] ?? activeSession.interviewMode}`,
+      ...(activeSession.companyName ? [`Company: ${activeSession.companyName}`] : []),
       "",
       ...messages.flatMap((message) => [
         `## ${message.role === "assistant" ? "Coach" : "Candidate"}`,
@@ -473,6 +520,30 @@ export function App() {
           <label>
             <span>
               <Target size={16} aria-hidden="true" />
+              Interview mode
+            </span>
+            <select
+              value={setup.interviewMode}
+              onChange={(event) =>
+                setSetup((current) => ({
+                  ...current,
+                  interviewMode: event.target.value as InterviewMode
+                }))
+              }
+            >
+              {(Object.entries(INTERVIEW_MODE_LABELS) as [InterviewMode, string][]).map(
+                ([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                )
+              )}
+            </select>
+          </label>
+
+          <label>
+            <span>
+              <Target size={16} aria-hidden="true" />
               Focus
             </span>
             <input
@@ -488,9 +559,80 @@ export function App() {
             />
           </label>
 
-          {/* Turnstile widget rendered by the TurnstileGate wrapper */}
-          {turnstileSiteKey && (
-            <div id="turnstile-portal" className="turnstileWrapper" />
+          <label>
+            <span>
+              <Building2 size={16} aria-hidden="true" />
+              Company (optional)
+            </span>
+            <input
+              value={setup.companyName}
+              onChange={(event) =>
+                setSetup((current) => ({
+                  ...current,
+                  companyName: event.target.value
+                }))
+              }
+              placeholder="e.g. Cloudflare"
+              maxLength={120}
+            />
+          </label>
+
+          <button
+            className="cvToggle"
+            type="button"
+            onClick={() => setShowCvFields((v) => !v)}
+          >
+            <FileText size={15} aria-hidden="true" />
+            {showCvFields ? "Hide CV & JD" : "Add CV & Job Description"}
+          </button>
+
+          {showCvFields && (
+            <>
+              <label>
+                <span>CV / Resume (paste text)</span>
+                <textarea
+                  value={setup.cvText}
+                  onChange={(event) =>
+                    setSetup((current) => ({
+                      ...current,
+                      cvText: event.target.value
+                    }))
+                  }
+                  placeholder="Paste your CV or résumé here..."
+                  rows={5}
+                  maxLength={6000}
+                />
+              </label>
+
+              <label>
+                <span>Job Description (paste text)</span>
+                <textarea
+                  value={setup.jobDescription}
+                  onChange={(event) =>
+                    setSetup((current) => ({
+                      ...current,
+                      jobDescription: event.target.value
+                    }))
+                  }
+                  placeholder="Paste the job description here..."
+                  rows={5}
+                  maxLength={4000}
+                />
+              </label>
+            </>
+          )}
+
+          {/* Turnstile bot-check widget */}
+          {TurnstileWidget && turnstileSiteKey && (
+            <Suspense fallback={null}>
+              <TurnstileWidget
+                ref={turnstileRef}
+                siteKey={turnstileSiteKey}
+                onSuccess={(token) => setTurnstileToken(token)}
+                onExpire={() => setTurnstileToken(null)}
+                onError={() => setTurnstileToken(null)}
+              />
+            </Suspense>
           )}
 
           <button
@@ -527,7 +669,7 @@ export function App() {
               >
                 <strong>{session.role}</strong>
                 <span>
-                  {session.level} - {session.focus}
+                  {session.level} — {INTERVIEW_MODE_LABELS[session.interviewMode] ?? session.interviewMode}
                 </span>
               </button>
             ))
@@ -538,7 +680,11 @@ export function App() {
       <section className="workspace" aria-label="Interview chat">
         <header className="chatHeader">
           <div>
-            <p>{activeSession ? activeSession.focus : "Start a session"}</p>
+            <p>
+              {activeSession
+                ? `${INTERVIEW_MODE_LABELS[activeSession.interviewMode] ?? activeSession.interviewMode}${activeSession.companyName ? ` — ${activeSession.companyName}` : ""}`
+                : "Start a session"}
+            </p>
             <h2>
               {activeSession
                 ? `${activeSession.level} ${activeSession.role}`
@@ -643,6 +789,14 @@ export function App() {
           >
             <WandSparkles size={17} aria-hidden="true" />
             Improve answer
+          </button>
+          <button
+            type="button"
+            onClick={() => void sendContent("", "rubric")}
+            disabled={!activeSession || isSending || !lastUserMessage}
+          >
+            <ClipboardCheck size={17} aria-hidden="true" />
+            Rubric score
           </button>
           <button
             type="button"

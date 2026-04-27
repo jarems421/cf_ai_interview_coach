@@ -219,6 +219,26 @@ body {
   background: var(--panel);
 }
 
+.cvToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--line-soft);
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.cvToggle:hover {
+  background: var(--line-soft);
+  color: var(--text);
+}
+
 label {
   display: grid;
   gap: 7px;
@@ -255,9 +275,13 @@ select {
 textarea {
   min-height: 76px;
   max-height: 180px;
-  padding: 13px 52px 13px 14px;
+  padding: 13px 14px;
   line-height: 1.45;
   resize: vertical;
+}
+
+.composer textarea {
+  padding-right: 52px;
 }
 
 input:focus,

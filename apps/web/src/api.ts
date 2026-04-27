@@ -1,4 +1,4 @@
-import type { Message, Session } from "./types";
+import type { Message, RubricResult, Session } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -63,6 +63,10 @@ export async function createSession(input: {
   role: string;
   level: string;
   focus: string;
+  companyName?: string;
+  cvText?: string;
+  jobDescription?: string;
+  interviewMode?: string;
   turnstileToken?: string;
   authToken?: string;
 }) {
@@ -146,7 +150,8 @@ export async function sendChatMessage(input: {
     | "next_question"
     | "technical_question"
     | "scorecard"
-    | "improve_answer";
+    | "improve_answer"
+    | "rubric";
   authToken?: string;
 }) {
   const { authToken, ...body } = input;
@@ -164,7 +169,7 @@ export async function sendChatMessage(input: {
       signal: controller.signal
     });
 
-    return parseResponse<{ reply: string }>(response);
+    return parseResponse<{ reply: string; rubric?: RubricResult }>(response);
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       throw new Error("The coach took too long to respond. Please try again.");
@@ -174,3 +179,4 @@ export async function sendChatMessage(input: {
     clearTimeout(timeout);
   }
 }
+

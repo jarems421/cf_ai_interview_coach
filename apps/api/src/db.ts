@@ -1,4 +1,4 @@
-import type { ChatRole, Message, Session, SessionSummary } from "./types";
+import type { ChatRole, InterviewMode, Message, Session, SessionSummary } from "./types";
 
 type SessionRow = {
   id: string;
@@ -6,6 +6,10 @@ type SessionRow = {
   role: string;
   level: string;
   focus: string;
+  companyName: string;
+  cvText: string;
+  jobDescription: string;
+  interviewMode: InterviewMode;
   createdAt: string;
   updatedAt: string;
 };
@@ -28,16 +32,29 @@ type SummaryRow = {
 
 export async function createSession(
   db: D1Database,
-  input: Pick<Session, "clientId" | "role" | "level" | "focus">
+  input: Pick<
+    Session,
+    "clientId" | "role" | "level" | "focus" | "companyName" | "cvText" | "jobDescription" | "interviewMode"
+  >
 ) {
   const id = crypto.randomUUID();
 
   await db
     .prepare(
-      `INSERT INTO sessions (id, client_id, role, level, focus)
-       VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO sessions (id, client_id, role, level, focus, company_name, cv_text, job_description, interview_mode)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .bind(id, input.clientId, input.role, input.level, input.focus)
+    .bind(
+      id,
+      input.clientId,
+      input.role,
+      input.level,
+      input.focus,
+      input.companyName,
+      input.cvText,
+      input.jobDescription,
+      input.interviewMode
+    )
     .run();
 
   await db
@@ -55,6 +72,8 @@ export async function listSessions(db: D1Database, clientId: string) {
   const result = await db
     .prepare(
       `SELECT id, client_id AS clientId, role, level, focus,
+              company_name AS companyName, cv_text AS cvText,
+              job_description AS jobDescription, interview_mode AS interviewMode,
               created_at AS createdAt, updated_at AS updatedAt
        FROM sessions
        WHERE client_id = ?
@@ -70,6 +89,8 @@ export async function getSession(db: D1Database, sessionId: string) {
   return await db
     .prepare(
       `SELECT id, client_id AS clientId, role, level, focus,
+              company_name AS companyName, cv_text AS cvText,
+              job_description AS jobDescription, interview_mode AS interviewMode,
               created_at AS createdAt, updated_at AS updatedAt
        FROM sessions
        WHERE id = ?`
@@ -167,6 +188,13 @@ export async function upsertSummary(
       summary.strengths,
       summary.improvementAreas
     )
+    .run();
+}
+
+export async function deleteSession(db: D1Database, sessionId: string) {
+  await db
+    .prepare(`DELETE FROM sessions WHERE id = ?`)
+    .bind(sessionId)
     .run();
 }
 

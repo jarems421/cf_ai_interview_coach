@@ -10,17 +10,27 @@ import {
 } from "./db";
 import {
   generateCoachReply,
+  generateRubric,
   generateUpdatedSummary,
   shouldUpdateSummary
 } from "./ai";
 import { HttpError, json, noContent, readJson, requireString } from "./http";
-import type { Env } from "./types";
+import {
+  buildFirstQuestionInstruction,
+  buildNextQuestionInstruction,
+  formatRubricAsText
+} from "./prompts";
+import type { Env, InterviewMode, RubricResult } from "./types";
 
 type CreateSessionBody = {
   clientId?: unknown;
   role?: unknown;
   level?: unknown;
   focus?: unknown;
+  companyName?: unknown;
+  cvText?: unknown;
+  jobDescription?: unknown;
+  interviewMode?: unknown;
   turnstileToken?: unknown;
 };
 
@@ -37,7 +47,24 @@ type ChatAction =
   | "next_question"
   | "technical_question"
   | "scorecard"
-  | "improve_answer";
+  | "improve_answer"
+  | "rubric";
+
+const VALID_INTERVIEW_MODES: InterviewMode[] = [
+  "behavioural",
+  "technical",
+  "project_deep_dive",
+  "company_motivation",
+  "weakness_gap",
+  "final_simulation"
+];
+
+function getInterviewMode(value: unknown): InterviewMode {
+  if (typeof value === "string" && (VALID_INTERVIEW_MODES as string[]).includes(value)) {
+    return value as InterviewMode;
+  }
+  return "behavioural";
+}
 
 function getChatAction(value: unknown): ChatAction {
   if (
@@ -45,7 +72,8 @@ function getChatAction(value: unknown): ChatAction {
     value === "next_question" ||
     value === "technical_question" ||
     value === "scorecard" ||
-    value === "improve_answer"
+    value === "improve_answer" ||
+    value === "rubric"
   ) {
     return value;
   }
@@ -53,13 +81,18 @@ function getChatAction(value: unknown): ChatAction {
   return "message";
 }
 
-function buildActionInstruction(action: ChatAction, message: string) {
+function buildActionInstruction(
+  action: ChatAction,
+  message: string,
+  interviewMode: InterviewMode,
+  companyName: string
+) {
   if (action === "first_question") {
-    return "Start the mock interview by asking exactly one focused opening question for the candidate's target role and level. Do not score the candidate yet.";
+    return buildFirstQuestionInstruction(interviewMode, companyName);
   }
 
   if (action === "next_question") {
-    return "Continue the mock interview like a real interviewer. Ask exactly one new follow-up or next-stage question based on the candidate's target role, level, focus area, and prior answers. Avoid repeating earlier questions.";
+    return buildNextQuestionInstruction(interviewMode, companyName);
   }
 
   if (action === "technical_question") {
@@ -160,6 +193,15 @@ export default {
         const role = requireString(body.role, "role");
         const level = requireString(body.level, "level");
         const focus = requireString(body.focus, "focus");
+        const companyName =
+          typeof body.companyName === "string" ? body.companyName.trim().slice(0, 120) : "";
+        const cvText =
+          typeof body.cvText === "string" ? body.cvText.trim().slice(0, 6000) : "";
+        const jobDescription =
+          typeof body.jobDescription === "string"
+            ? body.jobDescription.trim().slice(0, 4000)
+            : "";
+        const interviewMode = getInterviewMode(body.interviewMode);
 
         // Verify Turnstile token when configured
         if (env.TURNSTILE_SECRET_KEY) {
@@ -197,7 +239,11 @@ export default {
           clientId,
           role,
           level,
-          focus
+          focus,
+          companyName,
+          cvText,
+          jobDescription,
+          interviewMode
         });
 
         return json({ sessionId }, { status: 201 });
@@ -291,11 +337,42 @@ export default {
           (recentMessage) => recentMessage.role === "user"
         );
 
-        if ((action === "scorecard" || action === "improve_answer") && !hasCandidateAnswer) {
+        if (
+          (action === "scorecard" || action === "improve_answer" || action === "rubric") &&
+          !hasCandidateAnswer
+        ) {
           return json({
             reply:
               "I need at least one candidate answer before I can do that. Answer the current interview question first, then I can score or improve it."
           });
+        }
+
+        // Rubric action: generate structured score then store formatted text
+        if (action === "rubric") {
+          const lastUserMsg = [...recentMessages]
+            .reverse()
+            .find((m) => m.role === "user");
+          const lastAssistantMsg = [...recentMessages]
+            .reverse()
+            .find((m) => m.role === "assistant");
+
+          let rubric: RubricResult;
+          try {
+            rubric = await generateRubric({
+              ai: env.AI,
+              answer: lastUserMsg?.content ?? "",
+              question: lastAssistantMsg?.content ?? ""
+            });
+          } catch {
+            return json({
+              reply:
+                "I wasn't able to generate a rubric score right now. Please try again."
+            });
+          }
+
+          const reply = formatRubricAsText(rubric);
+          await addMessage(env.DB, sessionId, "assistant", reply);
+          return json({ reply, rubric });
         }
 
         const reply = await generateCoachReply({
@@ -304,7 +381,14 @@ export default {
           summary,
           messages: recentMessages,
           instruction:
-            action === "message" ? undefined : buildActionInstruction(action, message)
+            action === "message"
+              ? undefined
+              : buildActionInstruction(
+                  action,
+                  message,
+                  session.interviewMode ?? "behavioural",
+                  session.companyName ?? ""
+                )
         });
 
         await addMessage(env.DB, sessionId, "assistant", reply);
@@ -354,3 +438,4 @@ export default {
     }
   }
 };
+
