@@ -1,6 +1,7 @@
 import {
   addMessage,
   createSession,
+  deleteSession,
   getSession,
   getSummary,
   listMessages,
@@ -13,14 +14,19 @@ import {
   generateUpdatedSummary,
   shouldUpdateSummary
 } from "./ai";
-import { HttpError, json, noContent, readJson, requireString } from "./http";
-import type { Env } from "./types";
+import { HttpError, json, noContent, optionalString, readJson, requireString } from "./http";
+import type { Env, InterviewMode, SessionType } from "./types";
 
 type CreateSessionBody = {
   clientId?: unknown;
   role?: unknown;
   level?: unknown;
   focus?: unknown;
+  cvText?: unknown;
+  jobDescription?: unknown;
+  companyName?: unknown;
+  sessionType?: unknown;
+  interviewMode?: unknown;
 };
 
 type ChatBody = {
@@ -35,16 +41,22 @@ type ChatAction =
   | "first_question"
   | "next_question"
   | "technical_question"
+  | "tailored_question"
+  | "rubric_score"
   | "scorecard"
-  | "improve_answer";
+  | "improve_answer"
+  | "generate_report";
 
 function getChatAction(value: unknown): ChatAction {
   if (
     value === "first_question" ||
     value === "next_question" ||
     value === "technical_question" ||
+    value === "tailored_question" ||
+    value === "rubric_score" ||
     value === "scorecard" ||
-    value === "improve_answer"
+    value === "improve_answer" ||
+    value === "generate_report"
   ) {
     return value;
   }
@@ -52,7 +64,42 @@ function getChatAction(value: unknown): ChatAction {
   return "message";
 }
 
-function buildActionInstruction(action: ChatAction, message: string) {
+const SESSION_TYPE_LABELS: Record<string, string> = {
+  quick_practice: "Quick Practice",
+  full_mock: "Full Mock Interview",
+  project_defence: "Project Defence",
+  technical_screen: "Technical Screen",
+  company_specific: "Company-Specific"
+};
+
+function getSessionType(value: unknown): SessionType {
+  if (
+    value === "quick_practice" ||
+    value === "full_mock" ||
+    value === "project_defence" ||
+    value === "technical_screen" ||
+    value === "company_specific"
+  ) {
+    return value;
+  }
+  return "quick_practice";
+}
+
+function getInterviewMode(value: unknown): InterviewMode {
+  if (
+    value === "behavioural" ||
+    value === "technical" ||
+    value === "project_deep_dive" ||
+    value === "company_motivation" ||
+    value === "weakness_gap" ||
+    value === "final_simulation"
+  ) {
+    return value;
+  }
+  return "behavioural";
+}
+
+function buildActionInstruction(action: ChatAction, message: string, session?: { sessionType?: string; companyName?: string }) {
   if (action === "first_question") {
     return "Start the mock interview by asking exactly one focused opening question for the candidate's target role and level. Do not score the candidate yet.";
   }
@@ -65,12 +112,70 @@ function buildActionInstruction(action: ChatAction, message: string) {
     return "Ask exactly one practical technical interview question relevant to the candidate's target role and level. Make it answerable in chat, realistic for the role, and focused on tradeoffs, debugging, implementation, or system behavior. Do not ask for code unless the role clearly calls for it.";
   }
 
+  if (action === "tailored_question") {
+    const company = session?.companyName ? ` at ${session.companyName}` : "";
+    const sessionLabel =
+      SESSION_TYPE_LABELS[session?.sessionType ?? "quick_practice"] ?? "interview";
+    return (
+      `Based on the candidate's CV and the job description provided, generate exactly one ` +
+      `highly relevant interview question for the ${sessionLabel} session${company}. ` +
+      `The question should directly reference the candidate's experience or the specific ` +
+      `requirements in the job description.`
+    );
+  }
+
+  if (action === "rubric_score") {
+    return `Score the candidate's most recent answer using this rubric. Output in this exact format:
+
+RUBRIC SCORE
+────────────
+Relevance:           /10
+Specificity:         /10
+Technical depth:     /10
+Communication:       /10
+Evidence/examples:   /10
+────────────
+Overall:             /10
+
+Strengths: [one or two sentences]
+Weaknesses: [one or two sentences]
+Improved answer: [rewrite the answer in 3-4 sentences using STAR format with measurable impact]
+Follow-up an interviewer might ask: [one realistic follow-up question]`;
+  }
+
   if (action === "scorecard") {
     return "Give a concise interviewer scorecard based only on the candidate answers in this transcript. Include: overall readiness, strongest signal, biggest risk, and one drill to practice next. If evidence is thin, say so plainly.";
   }
 
   if (action === "improve_answer") {
     return `Rewrite the candidate's previous answer into a stronger interview answer using STAR format. Keep it natural, add measurable impact where possible, and explain the single strongest change. Previous answer: ${message}`;
+  }
+
+  if (action === "generate_report") {
+    return `Generate a comprehensive final interview report for this session. Use this format:
+
+FINAL SESSION REPORT
+════════════════════
+
+Overall Performance Score: /10
+
+Best Answer: [quote or describe the candidate's strongest answer and why it worked]
+
+Weakest Answer: [quote or describe the weakest answer and the key issue]
+
+Repeated Issues: [list any patterns that came up across multiple answers]
+
+STAR Improvements Suggested:
+[list specific STAR format improvements for key answers]
+
+Technical Depth Rating: /10
+[brief commentary]
+
+Confidence & Clarity Rating: /10
+[brief commentary]
+
+Next Practice Plan:
+[3-5 specific, actionable steps the candidate should take before their next interview]`;
   }
 
   return message;
@@ -95,12 +200,22 @@ export default {
         const role = requireString(body.role, "role");
         const level = requireString(body.level, "level");
         const focus = requireString(body.focus, "focus");
+        const cvText = optionalString(body.cvText, "cvText", 8000);
+        const jobDescription = optionalString(body.jobDescription, "jobDescription", 4000);
+        const companyName = optionalString(body.companyName, "companyName");
+        const sessionType = getSessionType(body.sessionType);
+        const interviewMode = getInterviewMode(body.interviewMode);
 
         const sessionId = await createSession(env.DB, {
           clientId,
           role,
           level,
-          focus
+          focus,
+          cvText,
+          jobDescription,
+          companyName,
+          sessionType,
+          interviewMode
         });
 
         return json({ sessionId }, { status: 201 });
@@ -109,6 +224,21 @@ export default {
       if (url.pathname === "/api/sessions" && request.method === "GET") {
         const clientId = requireString(url.searchParams.get("clientId"), "clientId");
         return json({ sessions: await listSessions(env.DB, clientId) });
+      }
+
+      const sessionMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)$/);
+
+      if (sessionMatch && request.method === "DELETE") {
+        const sessionId = decodeURIComponent(sessionMatch[1]);
+        const clientId = requireString(url.searchParams.get("clientId"), "clientId");
+        const session = await getSession(env.DB, sessionId);
+
+        if (!session || session.clientId !== clientId) {
+          throw new HttpError(404, "Session not found.");
+        }
+
+        await deleteSession(env.DB, sessionId);
+        return noContent();
       }
 
       const messagesMatch = url.pathname.match(
@@ -154,7 +284,7 @@ export default {
           (recentMessage) => recentMessage.role === "user"
         );
 
-        if ((action === "scorecard" || action === "improve_answer") && !hasCandidateAnswer) {
+        if ((action === "scorecard" || action === "rubric_score" || action === "improve_answer" || action === "generate_report") && !hasCandidateAnswer) {
           return json({
             reply:
               "I need at least one candidate answer before I can do that. Answer the current interview question first, then I can score or improve it."
@@ -167,7 +297,7 @@ export default {
           summary,
           messages: recentMessages,
           instruction:
-            action === "message" ? undefined : buildActionInstruction(action, message)
+            action === "message" ? undefined : buildActionInstruction(action, message, session)
         });
 
         await addMessage(env.DB, sessionId, "assistant", reply);

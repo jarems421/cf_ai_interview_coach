@@ -49,6 +49,11 @@ export async function generateCoachReply(input: {
         role: input.session.role,
         level: input.session.level,
         focus: input.session.focus,
+        cvText: input.session.cvText,
+        jobDescription: input.session.jobDescription,
+        companyName: input.session.companyName,
+        sessionType: input.session.sessionType,
+        interviewMode: input.session.interviewMode,
         summary: input.summary?.summary,
         strengths: input.summary?.strengths,
         improvementAreas: input.summary?.improvementAreas
