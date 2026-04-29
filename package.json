@@ -21,6 +21,7 @@
     "@vitejs/plugin-react": "^5.1.1",
     "fflate": "^0.8.2",
     "lucide-react": "^0.561.0",
+    "pdfjs-dist": "^5.7.284",
     "react": "^19.2.1",
     "react-dom": "^19.2.1"
   },

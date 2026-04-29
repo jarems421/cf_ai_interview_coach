@@ -295,6 +295,62 @@ body {
   resize: vertical;
 }
 
+.planEditor {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--field-bg);
+}
+
+.planEditorHeader {
+  display: grid;
+  gap: 2px;
+}
+
+.planEditorHeader span {
+  color: var(--label);
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.planEditorHeader small,
+.planStageRow small {
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.planStageList {
+  display: grid;
+  gap: 8px;
+}
+
+.planStageRow {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 74px;
+  gap: 10px;
+  align-items: start;
+}
+
+.planStageRow strong {
+  display: block;
+  color: var(--text-soft);
+  font-size: 0.84rem;
+}
+
+.planStageRow label {
+  gap: 4px;
+  font-size: 0.7rem;
+}
+
+.planStageRow input {
+  min-height: 34px;
+  padding: 0 8px;
+}
+
 label {
   display: grid;
   gap: 7px;
@@ -623,6 +679,48 @@ button {
   min-height: 100vh;
   display: grid;
   grid-template-rows: auto auto 1fr auto auto;
+}
+
+.interviewTimeline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  padding: 14px 32px 0;
+}
+
+.timelineStage {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: var(--panel);
+}
+
+.timelineStage.current {
+  border-color: var(--accent);
+  background: var(--selected);
+}
+
+.timelineStage.complete {
+  border-color: var(--pill-border);
+  background: var(--pill-bg);
+}
+
+.timelineStage span {
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timelineStage small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 750;
 }
 
 .chatHeader {
@@ -1000,7 +1098,8 @@ button {
 
   .chatHeader,
   .transcript,
-  .guidedActions {
+  .guidedActions,
+  .interviewTimeline {
     padding-left: 20px;
     padding-right: 20px;
   }

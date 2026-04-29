@@ -6,6 +6,12 @@ import type {
   SessionSummary,
   SessionType
 } from "./types";
+import {
+  getDefaultInterviewPlan,
+  getInitialInterviewProgress,
+  normalizeInterviewPlan,
+  normalizeInterviewProgress
+} from "./interviewPlan";
 
 type SessionRow = {
   id: string;
@@ -18,6 +24,8 @@ type SessionRow = {
   companyName: string;
   sessionType: SessionType;
   interviewMode: InterviewMode;
+  interviewPlan: string;
+  interviewProgress: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -37,6 +45,40 @@ type SummaryRow = {
   improvementAreas: string;
   updatedAt: string;
 };
+
+function parseJson(value: string) {
+  try {
+    return value ? (JSON.parse(value) as unknown) : null;
+  } catch {
+    return null;
+  }
+}
+
+function mapSessionRow(row: SessionRow): Session {
+  const interviewPlan = normalizeInterviewPlan(
+    parseJson(row.interviewPlan),
+    row.sessionType
+  );
+
+  return {
+    ...row,
+    interviewPlan,
+    interviewProgress: normalizeInterviewProgress(
+      parseJson(row.interviewProgress),
+      interviewPlan
+    )
+  };
+}
+
+function serializePlan(input: Pick<Session, "interviewPlan" | "sessionType">) {
+  return JSON.stringify(
+    input.interviewPlan ?? getDefaultInterviewPlan(input.sessionType)
+  );
+}
+
+function serializeProgress(input?: Pick<Session, "interviewProgress">) {
+  return JSON.stringify(input?.interviewProgress ?? getInitialInterviewProgress());
+}
 
 export async function upsertUser(
   db: D1Database,
@@ -68,6 +110,7 @@ export async function createSession(
     | "companyName"
     | "sessionType"
     | "interviewMode"
+    | "interviewPlan"
   >
 ) {
   const id = crypto.randomUUID();
@@ -76,8 +119,8 @@ export async function createSession(
     .prepare(
       `INSERT INTO sessions
         (id, client_id, user_id, role, level, focus, cv_text, job_description,
-         company_name, session_type, interview_mode)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         company_name, session_type, interview_mode, interview_plan, interview_progress)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       id,
@@ -90,7 +133,9 @@ export async function createSession(
       input.jobDescription,
       input.companyName,
       input.sessionType,
-      input.interviewMode
+      input.interviewMode,
+      serializePlan(input),
+      serializeProgress()
     )
     .run();
 
@@ -118,6 +163,7 @@ export async function updateSession(
     | "companyName"
     | "sessionType"
     | "interviewMode"
+    | "interviewPlan"
   >
 ) {
   await db
@@ -131,6 +177,7 @@ export async function updateSession(
            company_name = ?,
            session_type = ?,
            interview_mode = ?,
+           interview_plan = ?,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`
     )
@@ -143,6 +190,7 @@ export async function updateSession(
       input.companyName,
       input.sessionType,
       input.interviewMode,
+      serializePlan(input),
       sessionId
     )
     .run();
@@ -159,6 +207,7 @@ export async function listSessions(db: D1Database, clientId: string) {
               cv_text AS cvText, job_description AS jobDescription,
               company_name AS companyName, session_type AS sessionType,
               interview_mode AS interviewMode,
+              interview_plan AS interviewPlan, interview_progress AS interviewProgress,
               created_at AS createdAt, updated_at AS updatedAt
        FROM sessions
        WHERE client_id = ?
@@ -167,22 +216,41 @@ export async function listSessions(db: D1Database, clientId: string) {
     .bind(clientId)
     .all<SessionRow>();
 
-  return (result.results ?? []) satisfies Session[];
+  return (result.results ?? []).map(mapSessionRow) satisfies Session[];
 }
 
 export async function getSession(db: D1Database, sessionId: string) {
-  return await db
+  const row = await db
     .prepare(
       `SELECT id, client_id AS clientId, role, level, focus,
               cv_text AS cvText, job_description AS jobDescription,
               company_name AS companyName, session_type AS sessionType,
               interview_mode AS interviewMode,
+              interview_plan AS interviewPlan, interview_progress AS interviewProgress,
               created_at AS createdAt, updated_at AS updatedAt
        FROM sessions
        WHERE id = ?`
     )
     .bind(sessionId)
     .first<SessionRow>();
+
+  return row ? mapSessionRow(row) : null;
+}
+
+export async function updateInterviewProgress(
+  db: D1Database,
+  sessionId: string,
+  progress: Session["interviewProgress"]
+) {
+  await db
+    .prepare(
+      `UPDATE sessions
+       SET interview_progress = ?,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    )
+    .bind(JSON.stringify(progress), sessionId)
+    .run();
 }
 
 export async function listMessages(db: D1Database, sessionId: string) {

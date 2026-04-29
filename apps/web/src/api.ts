@@ -1,7 +1,9 @@
 import type {
   AuthState,
   InterviewMode,
+  InterviewPlan,
   Message,
+  ResumeExtractResult,
   Session,
   SessionType
 } from "./types";
@@ -94,6 +96,7 @@ export async function createSession(input: {
   companyName?: string;
   sessionType?: SessionType;
   interviewMode?: InterviewMode;
+  interviewPlan?: InterviewPlan;
 }) {
   return requestJson<{ sessionId: string }>(`${API_BASE}/api/sessions`, {
     method: "POST",
@@ -129,6 +132,7 @@ export async function updateSession(input: {
   companyName?: string;
   sessionType?: SessionType;
   interviewMode?: InterviewMode;
+  interviewPlan?: InterviewPlan;
 }) {
   return requestJson<{ ok: true }>(
     `${API_BASE}/api/sessions/${input.sessionId}`,
@@ -139,6 +143,18 @@ export async function updateSession(input: {
       body: JSON.stringify(input)
     }
   );
+}
+
+export async function extractResume(input: { clientId: string; file: File }) {
+  const formData = new FormData();
+  formData.append("clientId", input.clientId);
+  formData.append("file", input.file);
+
+  return requestJson<ResumeExtractResult>(`${API_BASE}/api/resume/extract`, {
+    method: "POST",
+    credentials: "include",
+    body: formData
+  });
 }
 
 export async function deleteSession(clientId: string, sessionId: string) {

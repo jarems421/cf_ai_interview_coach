@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
+import { strToU8, zipSync } from "fflate";
 import { getAuthLinks } from "../src/auth";
+import {
+  advanceInterviewProgress,
+  buildStageInstruction,
+  getDefaultInterviewPlan,
+  getInitialInterviewProgress,
+  normalizeInterviewPlan
+} from "../src/interviewPlan";
 import worker, {
   assertChatRateLimit,
-  buildActionInstruction,
+  buildActionInstruction as buildChatActionInstruction,
   resetChatRateLimitsForTest
 } from "../src/index";
+import { extractResumeFile } from "../src/resume";
 import type { Env } from "../src/types";
 
 function createEnv(results: Record<string, unknown[]> = {}) {
@@ -74,6 +83,8 @@ function createChatEnv(
     companyName: "",
     sessionType: "quick_practice" as const,
     interviewMode: "behavioural" as const,
+    interviewPlan: getDefaultInterviewPlan("quick_practice"),
+    interviewProgress: getInitialInterviewProgress(),
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString()
   };
@@ -196,7 +207,9 @@ describe("worker", () => {
       "",
       "",
       "quick_practice",
-      "behavioural"
+      "behavioural",
+      expect.stringContaining("Warm-up"),
+      JSON.stringify({ stageIndex: 0, questionInStage: 0, completed: false })
     ]);
   });
 
@@ -289,6 +302,13 @@ describe("worker", () => {
     expect(aiCalls).toHaveLength(1);
     expect(calls.some((call) => call.params.includes("user"))).toBe(false);
     expect(calls.some((call) => call.params.includes("assistant"))).toBe(true);
+    expect(
+      calls.some(
+        (call) =>
+          call.sql.includes("UPDATE sessions") &&
+          call.sql.includes("interview_progress")
+      )
+    ).toBe(true);
   });
 
   it("supports technical question commands", async () => {
@@ -351,7 +371,7 @@ describe("worker", () => {
   });
 
   it("supports rubric score command", async () => {
-    const { env, aiCalls } = createChatEnv();
+    const { env, calls, aiCalls } = createChatEnv();
     const response = await worker.fetch(
       new Request("https://example.com/api/chat", {
         method: "POST",
@@ -366,6 +386,13 @@ describe("worker", () => {
 
     expect(response.status).toBe(200);
     expect(aiCalls).toHaveLength(1);
+    expect(
+      calls.some(
+        (call) =>
+          call.sql.includes("UPDATE sessions") &&
+          call.sql.includes("interview_progress")
+      )
+    ).toBe(false);
   });
 
   it("supports generate report command", async () => {
@@ -457,7 +484,9 @@ describe("worker", () => {
       "Build large-scale infrastructure at Cloudflare.",
       "Cloudflare",
       "full_mock",
-      "technical"
+      "technical",
+      expect.stringContaining("Role depth"),
+      JSON.stringify({ stageIndex: 0, questionInStage: 0, completed: false })
     ]);
   });
 
@@ -471,15 +500,125 @@ describe("worker", () => {
   });
 
   it("builds technical questions around scenarios and tradeoffs", () => {
-    expect(buildActionInstruction("technical_question", "")).toContain(
+    expect(buildChatActionInstruction("technical_question", "")).toContain(
       "realistic scenario"
     );
-    expect(buildActionInstruction("technical_question", "")).toContain(
+    expect(buildChatActionInstruction("technical_question", "")).toContain(
       "edge cases"
     );
-    expect(buildActionInstruction("technical_question", "")).toContain(
+    expect(buildChatActionInstruction("technical_question", "")).toContain(
       "tradeoffs"
     );
+  });
+
+  it("normalizes interview plans and advances progress", () => {
+    const plan = normalizeInterviewPlan(
+      {
+        stages: [
+          {
+            id: "opener",
+            label: "Opener",
+            objective: "Start",
+            questionCount: 99,
+            enabled: true
+          },
+          {
+            id: "disabled",
+            label: "Disabled",
+            objective: "Skip",
+            questionCount: 2,
+            enabled: false
+          }
+        ]
+      },
+      "full_mock"
+    );
+
+    expect(plan.stages).toHaveLength(1);
+    expect(plan.stages[0].questionCount).toBe(6);
+    expect(
+      advanceInterviewProgress(
+        { stageIndex: 0, questionInStage: 5, completed: false },
+        plan
+      )
+    ).toEqual({ stageIndex: 0, questionInStage: 6, completed: true });
+  });
+
+  it("builds stage-aware prompts with personalization context", () => {
+    const instruction = buildStageInstruction({
+      id: "session-1",
+      clientId: "browser-1",
+      role: "Security Engineer",
+      level: "Mid-level",
+      focus: "incident response",
+      cvText: "Built a SIEM enrichment project with Python.",
+      jobDescription: "Investigate security alerts and improve SOC workflows.",
+      companyName: "Cloudflare",
+      sessionType: "technical_screen",
+      interviewMode: "technical",
+      interviewPlan: getDefaultInterviewPlan("technical_screen"),
+      interviewProgress: getInitialInterviewProgress(),
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString()
+    });
+
+    expect(instruction).toContain("Current interview stage");
+    expect(instruction).toContain("Stage objective");
+    expect(instruction).toContain("candidate's CV");
+    expect(instruction).toContain("job description");
+    expect(instruction).toContain("Cloudflare");
+  });
+
+  it("extracts readable TXT resumes", async () => {
+    const file = new File(
+      [
+        "Built APIs in TypeScript, improved latency by 35%, and led accessibility reviews across a React platform."
+      ],
+      "resume.txt",
+      { type: "text/plain" }
+    );
+
+    await expect(extractResumeFile(file)).resolves.toMatchObject({
+      fileName: "resume.txt",
+      fileType: "txt",
+      text: expect.stringContaining("Built APIs in TypeScript"),
+      quality: "warning"
+    });
+  });
+
+  it("extracts readable DOCX resumes", async () => {
+    const docx = zipSync({
+      "word/document.xml": strToU8(
+        '<w:document><w:body><w:p><w:r><w:t>Designed cloud security controls, automated incident triage, and mentored analysts.</w:t></w:r></w:p></w:body></w:document>'
+      )
+    });
+    const docxBuffer = docx.buffer.slice(
+      docx.byteOffset,
+      docx.byteOffset + docx.byteLength
+    ) as ArrayBuffer;
+    const file = new File([docxBuffer], "resume.docx", {
+      type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    });
+
+    await expect(extractResumeFile(file)).resolves.toMatchObject({
+      fileName: "resume.docx",
+      fileType: "docx",
+      text: expect.stringContaining("cloud security controls")
+    });
+  });
+
+  it("rejects unsupported, oversized, and unreadable resume uploads", async () => {
+    await expect(
+      extractResumeFile(new File(["hello"], "resume.rtf"))
+    ).rejects.toThrow("Upload a PDF, DOCX, TXT, or Markdown resume.");
+
+    await expect(
+      extractResumeFile(new File([new ArrayBuffer(5 * 1024 * 1024 + 1)], "big.txt"))
+    ).rejects.toThrow("Resume file must be 5 MB or smaller.");
+
+    await expect(
+      extractResumeFile(new File(["\u0001".repeat(100)], "broken.txt"))
+    ).rejects.toThrow("unreadable text");
   });
 
   it("rate limits repeated chat requests by profile", () => {

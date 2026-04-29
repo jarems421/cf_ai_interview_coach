@@ -8,10 +8,17 @@ import {
   listMessages,
   listRecentMessages,
   listSessions,
+  updateInterviewProgress,
   updateSession,
   upsertSummary,
   upsertUser
 } from "./db";
+import {
+  advanceInterviewProgress,
+  buildStageInstruction,
+  normalizeInterviewPlan,
+  shouldAdvanceProgress
+} from "./interviewPlan";
 import { getAuthLinks, getRequestUser } from "./auth";
 import {
   consumeAiEventStream,
@@ -29,6 +36,7 @@ import {
   readJson,
   requireString
 } from "./http";
+import { extractResumeFile } from "./resume";
 import type {
   Env,
   InterviewMode,
@@ -48,6 +56,7 @@ type CreateSessionBody = {
   companyName?: unknown;
   sessionType?: unknown;
   interviewMode?: unknown;
+  interviewPlan?: unknown;
 };
 
 type ChatBody = {
@@ -68,6 +77,7 @@ type UpdateSessionBody = {
   companyName?: unknown;
   sessionType?: unknown;
   interviewMode?: unknown;
+  interviewPlan?: unknown;
 };
 
 type ChatAction =
@@ -168,18 +178,29 @@ function getInterviewMode(value: unknown): InterviewMode {
 export function buildActionInstruction(
   action: ChatAction,
   message: string,
-  session?: { sessionType?: string; companyName?: string }
+  session?: Session
 ) {
+  const stageInstruction = session ? `\n\n${buildStageInstruction(session)}` : "";
+
   if (action === "first_question") {
-    return "Start the mock interview by asking exactly one focused opening question for the candidate's target role and level. Do not score the candidate yet.";
+    return (
+      "Start the mock interview by asking exactly one focused opening question for the candidate's target role and level. Do not score the candidate yet." +
+      stageInstruction
+    );
   }
 
   if (action === "next_question") {
-    return "Continue the mock interview like a real interviewer. Ask exactly one new follow-up or next-stage question based on the candidate's target role, level, focus area, and prior answers. Avoid repeating earlier questions.";
+    return (
+      "Continue the mock interview like a real interviewer. Ask exactly one new follow-up or next-stage question based on the candidate's target role, level, focus area, and prior answers. Avoid repeating earlier questions." +
+      stageInstruction
+    );
   }
 
   if (action === "technical_question") {
-    return "Ask exactly one practical technical interview question relevant to the candidate's target role and level. Make it a realistic scenario, not trivia. It should be answerable in chat and test reasoning about constraints, implementation approach, debugging signals, edge cases, system behavior, and tradeoffs. Include enough context for the candidate to reason, but do not provide the answer.";
+    return (
+      "Ask exactly one practical technical interview question relevant to the candidate's target role and level. Make it a realistic scenario, not trivia. It should be answerable in chat and test reasoning about constraints, implementation approach, debugging signals, edge cases, system behavior, and tradeoffs. Include enough context for the candidate to reason, but do not provide the answer." +
+      stageInstruction
+    );
   }
 
   if (action === "tailored_question") {
@@ -190,7 +211,8 @@ export function buildActionInstruction(
       `Based on the candidate's CV and the job description provided, generate exactly one ` +
       `highly relevant interview question for the ${sessionLabel} session${company}. ` +
       `The question should directly reference the candidate's experience or the specific ` +
-      `requirements in the job description.`
+      `requirements in the job description.` +
+      stageInstruction
     );
   }
 
@@ -338,6 +360,32 @@ async function maybeUpdateSummary(input: {
   }
 }
 
+async function maybeAdvanceProgress(input: {
+  env: Env;
+  session: Session;
+  action: ChatAction;
+}) {
+  if (!shouldAdvanceProgress(input.action)) {
+    return input.session.interviewProgress;
+  }
+
+  const plan =
+    input.session.interviewPlan ??
+    normalizeInterviewPlan(null, input.session.sessionType);
+  const progress =
+    input.session.interviewProgress ?? {
+      stageIndex: 0,
+      questionInStage: 0,
+      completed: false
+    };
+  const nextProgress = advanceInterviewProgress(
+    progress,
+    plan
+  );
+  await updateInterviewProgress(input.env.DB, input.session.id, nextProgress);
+  return nextProgress;
+}
+
 function streamCoachReply(input: {
   request: Request;
   env: Env;
@@ -374,6 +422,11 @@ function streamCoachReply(input: {
           }
 
           await addMessage(input.env.DB, input.sessionId, "assistant", trimmedReply);
+          await maybeAdvanceProgress({
+            env: input.env,
+            session: input.session,
+            action: input.action
+          });
           await maybeUpdateSummary({
             env: input.env,
             action: input.action,
@@ -420,6 +473,19 @@ export default {
         return json({ user, ...getAuthLinks(env) }, {}, request);
       }
 
+      if (url.pathname === "/api/resume/extract" && request.method === "POST") {
+        const formData = await request.formData();
+        const user = await getRequestUser(request, env, formData.get("clientId"));
+        await upsertUser(env.DB, user);
+        const file = formData.get("file");
+
+        if (!(file instanceof File)) {
+          throw new HttpError(400, "Resume file is required.");
+        }
+
+        return json(await extractResumeFile(file), {}, request);
+      }
+
       if (url.pathname === "/api/sessions" && request.method === "POST") {
         const body = await readJson<CreateSessionBody>(request);
         const user = await getRequestUser(request, env, body.clientId);
@@ -436,6 +502,10 @@ export default {
         const companyName = optionalString(body.companyName, "companyName");
         const sessionType = getSessionType(body.sessionType);
         const interviewMode = getInterviewMode(body.interviewMode);
+        const interviewPlan = normalizeInterviewPlan(
+          body.interviewPlan,
+          sessionType
+        );
 
         const sessionId = await createSession(env.DB, {
           clientId: user.id,
@@ -446,7 +516,8 @@ export default {
           jobDescription,
           companyName,
           sessionType,
-          interviewMode
+          interviewMode,
+          interviewPlan
         });
 
         return json({ sessionId }, { status: 201 }, request);
@@ -486,6 +557,10 @@ export default {
         const companyName = optionalString(body.companyName, "companyName");
         const sessionType = getSessionType(body.sessionType);
         const interviewMode = getInterviewMode(body.interviewMode);
+        const interviewPlan = normalizeInterviewPlan(
+          body.interviewPlan,
+          sessionType
+        );
 
         await updateSession(env.DB, sessionId, {
           role,
@@ -495,7 +570,8 @@ export default {
           jobDescription,
           companyName,
           sessionType,
-          interviewMode
+          interviewMode,
+          interviewPlan
         });
         return json({ ok: true }, {}, request);
       }
@@ -613,6 +689,11 @@ export default {
         });
 
         await addMessage(env.DB, sessionId, "assistant", reply);
+        await maybeAdvanceProgress({
+          env,
+          session,
+          action
+        });
         await maybeUpdateSummary({
           env,
           action,

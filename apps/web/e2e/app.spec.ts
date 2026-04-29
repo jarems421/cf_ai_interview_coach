@@ -1,6 +1,36 @@
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
+  const quickPracticePlan = {
+    stages: [
+      {
+        id: "warmup",
+        label: "Warm-up",
+        objective: "Open with one realistic role-calibrated question.",
+        questionCount: 1,
+        enabled: true
+      },
+      {
+        id: "focused_drill",
+        label: "Focused drill",
+        objective: "Probe the candidate's stated focus area with a practical follow-up.",
+        questionCount: 2,
+        enabled: true
+      },
+      {
+        id: "recap",
+        label: "Recap",
+        objective: "Ask one final improvement-focused question before feedback.",
+        questionCount: 1,
+        enabled: true
+      }
+    ]
+  };
+  const initialProgress = {
+    stageIndex: 0,
+    questionInStage: 0,
+    completed: false
+  };
   let createdSession = false;
   let createdPayload = {
     role: "Frontend Engineer",
@@ -10,7 +40,9 @@ test.beforeEach(async ({ page }) => {
     jobDescription: "Cloudflare frontend role.",
     companyName: "",
     sessionType: "quick_practice",
-    interviewMode: "behavioural"
+    interviewMode: "behavioural",
+    interviewPlan: quickPracticePlan,
+    interviewProgress: initialProgress
   };
 
   await page.route("**/api/me?**", async (route) => {
@@ -57,16 +89,24 @@ test.beforeEach(async ({ page }) => {
       role: string;
       cvText: string;
       jobDescription: string;
+      sessionType: string;
       interviewMode: string;
+      interviewPlan: { stages: Array<{ label: string; questionCount: number }> };
     };
 
     expect(body.role).toBe("Backend Engineer");
     expect(body.cvText).toContain("Built APIs in TypeScript");
     expect(body.jobDescription).toContain("Cloudflare");
+    expect(body.sessionType).toBe("full_mock");
     expect(body.interviewMode).toBe("technical");
+    expect(body.interviewPlan.stages[0]).toMatchObject({
+      label: "Opener",
+      questionCount: 2
+    });
     createdPayload = {
       ...createdPayload,
-      ...body
+      ...body,
+      interviewProgress: initialProgress
     };
     createdSession = true;
 
@@ -74,6 +114,19 @@ test.beforeEach(async ({ page }) => {
       status: 201,
       contentType: "application/json",
       body: JSON.stringify({ sessionId: "session-1" })
+    });
+  });
+
+  await page.route("**/api/resume/extract", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        text: "Built APIs in TypeScript and improved latency for a production platform.",
+        fileName: "resume.txt",
+        fileType: "txt",
+        characterCount: 70,
+        quality: "warning"
+      })
     });
   });
 });
@@ -132,6 +185,8 @@ test("shows signed-in onboarding and creates a tailored session", async ({ page 
   await page.getByRole("option", { name: "Backend Engineer" }).click();
   await page.getByRole("textbox", { name: "Focus" }).fill("system");
   await page.getByRole("option", { name: "System design and tradeoffs" }).click();
+  await page.getByLabel("Session type").selectOption("full_mock");
+  await page.locator(".planStageRow input").first().fill("2");
   await page.getByLabel("Interview mode").selectOption("technical");
 
   await page.getByRole("button", { name: /add cv and job description/i }).click();
@@ -154,6 +209,9 @@ test("shows signed-in onboarding and creates a tailored session", async ({ page 
 
   await expect(
     page.getByText("Send your first answer or ask for a practice question.")
+  ).toBeVisible();
+  await expect(
+    page.getByLabel("Interview progress").getByText("Opener")
   ).toBeVisible();
   await expect(page.getByRole("button", { name: /technical drill/i })).toBeVisible();
   await expect(page.getByText("Scenario-based question")).toBeVisible();

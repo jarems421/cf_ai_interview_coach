@@ -41,12 +41,18 @@ import {
 import {
   createSession,
   deleteSession,
+  extractResume,
   listMessages,
   listSessions,
   streamChatMessage,
   updateSession
 } from "./api";
-import { extractResumeText } from "./resume";
+import {
+  getActiveStages,
+  getCurrentStage,
+  getDefaultInterviewPlan,
+  updateStageQuestionCount
+} from "./interviewPlan";
 import {
   getBasicSuggestionOptions,
   getRoleSuggestionOptions,
@@ -54,6 +60,7 @@ import {
 } from "./suggestions";
 import type {
   InterviewMode,
+  InterviewPlan,
   Message,
   Session,
   SessionType
@@ -68,6 +75,7 @@ type SetupForm = {
   companyName: string;
   sessionType: SessionType;
   interviewMode: InterviewMode;
+  interviewPlan: InterviewPlan;
 };
 
 type ChatAction =
@@ -109,7 +117,8 @@ const defaultSetup: SetupForm = {
   jobDescription: "",
   companyName: "",
   sessionType: "quick_practice",
-  interviewMode: "behavioural"
+  interviewMode: "behavioural",
+  interviewPlan: getDefaultInterviewPlan("quick_practice")
 };
 
 const SESSION_TYPE_LABELS: Record<SessionType, string> = {
@@ -415,6 +424,91 @@ function GuidedInput({
   );
 }
 
+function InterviewPlanEditor({
+  plan,
+  onChange
+}: {
+  plan: InterviewPlan;
+  onChange: (plan: InterviewPlan) => void;
+}) {
+  return (
+    <div className="planEditor" aria-label="Interview format">
+      <div className="planEditorHeader">
+        <span>Interview format</span>
+        <small>Adjust stages for this session</small>
+      </div>
+      <div className="planStageList">
+        {plan.stages.map((stage) => (
+          <div className="planStageRow" key={stage.id}>
+            <div>
+              <strong>{stage.label}</strong>
+              <small>{stage.objective}</small>
+            </div>
+            <label>
+              <span>Questions</span>
+              <input
+                type="number"
+                min={0}
+                max={6}
+                value={stage.enabled ? stage.questionCount : 0}
+                onChange={(event) =>
+                  onChange(
+                    updateStageQuestionCount(
+                      plan,
+                      stage.id,
+                      Number(event.target.value)
+                    )
+                  )
+                }
+              />
+            </label>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function InterviewTimeline({ session }: { session: Session }) {
+  const stages = getActiveStages(session.interviewPlan);
+  const currentStage = getCurrentStage(session);
+
+  if (stages.length === 0 || !currentStage) {
+    return null;
+  }
+
+  return (
+    <div className="interviewTimeline" aria-label="Interview progress">
+      {stages.map((stage, index) => {
+        const isCurrent =
+          !session.interviewProgress.completed &&
+          index === session.interviewProgress.stageIndex;
+        const isComplete =
+          session.interviewProgress.completed ||
+          index < session.interviewProgress.stageIndex;
+        const progressText = isCurrent
+          ? `${Math.min(
+              session.interviewProgress.questionInStage + 1,
+              stage.questionCount
+            )}/${stage.questionCount}`
+          : `${stage.questionCount}`;
+
+        return (
+          <div
+            className={`timelineStage ${isCurrent ? "current" : ""} ${
+              isComplete ? "complete" : ""
+            }`}
+            key={stage.id}
+          >
+            <span>{stage.label}</span>
+            <small>{isCurrent ? progressText : isComplete ? "Done" : progressText}</small>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function parseInlineMarkdown(text: string): InlinePart[] {
   const parts: InlinePart[] = [];
   const pattern = /(\*\*[^*]+\*\*|`[^`]+`)/g;
@@ -565,6 +659,7 @@ export function App() {
     }
 
     const hasAnswer = Boolean(lastUserMessage);
+    const planComplete = activeSession.interviewProgress.completed;
     const isTechnical =
       activeSession.interviewMode === "technical" ||
       activeSession.sessionType === "technical_screen";
@@ -574,31 +669,45 @@ export function App() {
     const isDeepDive = activeSession.interviewMode === "project_deep_dive";
     const actions: GuidedAction[] = [
       {
-        action: hasAssistantQuestion ? "next_question" : "first_question",
-        label: hasAssistantQuestion ? "Next guided question" : "Start interview",
-        detail: hasAssistantQuestion
-          ? "Move one step deeper based on the last answer."
-          : "Begin with one focused opening question.",
-        icon: <MessageSquareText size={17} aria-hidden="true" />,
+        action: planComplete
+          ? "generate_report"
+          : hasAssistantQuestion
+            ? "next_question"
+            : "first_question",
+        label: planComplete
+          ? "Generate final report"
+          : hasAssistantQuestion
+            ? "Next guided question"
+            : "Start interview",
+        detail: planComplete
+          ? "The structured interview plan is complete."
+          : hasAssistantQuestion
+            ? "Move to the next stage-aware interview question."
+            : "Begin with the first question in the interview plan.",
+        icon: planComplete ? (
+          <ClipboardCheck size={17} aria-hidden="true" />
+        ) : (
+          <MessageSquareText size={17} aria-hidden="true" />
+        ),
         primary: true
       }
     ];
 
-    if (isTechnical) {
+    if (!planComplete && isTechnical) {
       actions.push({
         action: "technical_question",
         label: "Technical drill",
         detail: "Scenario-based question with tradeoffs and edge cases.",
         icon: <TerminalSquare size={17} aria-hidden="true" />
       });
-    } else if (isCompany && hasTailoring) {
+    } else if (!planComplete && isCompany && hasTailoring) {
       actions.push({
         action: "tailored_question",
         label: "Company-tailored question",
         detail: "Use the company, CV, and job description context.",
         icon: <FileText size={17} aria-hidden="true" />
       });
-    } else if (isDeepDive) {
+    } else if (!planComplete && isDeepDive) {
       actions.push({
         action: "tailored_question",
         label: "Project deep-dive",
@@ -606,7 +715,7 @@ export function App() {
         icon: <FileText size={17} aria-hidden="true" />,
         disabled: !hasTailoring
       });
-    } else if (hasTailoring) {
+    } else if (!planComplete && hasTailoring) {
       actions.push({
         action: "tailored_question",
         label: "Tailored question",
@@ -785,7 +894,8 @@ export function App() {
       jobDescription: session.jobDescription,
       companyName: session.companyName,
       sessionType: session.sessionType,
-      interviewMode: session.interviewMode
+      interviewMode: session.interviewMode,
+      interviewPlan: session.interviewPlan
     });
   }
 
@@ -810,7 +920,8 @@ export function App() {
         jobDescription: editSetup.jobDescription,
         companyName: editSetup.companyName,
         sessionType: editSetup.sessionType,
-        interviewMode: editSetup.interviewMode
+        interviewMode: editSetup.interviewMode,
+        interviewPlan: editSetup.interviewPlan
       });
       setEditingSessionId(null);
       await refreshSessions(editingSessionId);
@@ -832,14 +943,18 @@ export function App() {
       return;
     }
 
+    if (!account) {
+      return;
+    }
+
     const setStatus =
       target === "setup" ? setResumeUploadStatus : setEditResumeUploadStatus;
     setStatus(`Reading ${file.name}...`);
     setError(null);
 
     try {
-      const extractedText = await extractResumeText(file);
-      const clippedText = extractedText.slice(0, 8000);
+      const result = await extractResume({ clientId, file });
+      const clippedText = result.text.slice(0, 8000);
 
       if (target === "setup") {
         setSetup((current) => ({ ...current, cvText: clippedText }));
@@ -848,9 +963,9 @@ export function App() {
       }
 
       setStatus(
-        extractedText.length > 8000
-          ? `Loaded ${file.name}. Trimmed to the first 8,000 characters.`
-          : `Loaded ${file.name}.`
+        result.text.length > 8000
+          ? `Loaded ${result.fileName}. Trimmed to the first 8,000 characters.`
+          : `Loaded ${result.fileName}. ${result.characterCount.toLocaleString()} readable characters.`
       );
     } catch (caught) {
       const message =
@@ -1154,12 +1269,14 @@ export function App() {
             </span>
             <select
               value={setup.sessionType}
-              onChange={(event) =>
+              onChange={(event) => {
+                const sessionType = event.target.value as SessionType;
                 setSetup((current) => ({
                   ...current,
-                  sessionType: event.target.value as SessionType
-                }))
-              }
+                  sessionType,
+                  interviewPlan: getDefaultInterviewPlan(sessionType)
+                }));
+              }}
             >
               {(Object.entries(SESSION_TYPE_LABELS) as [SessionType, string][]).map(
                 ([value, label]) => (
@@ -1170,6 +1287,13 @@ export function App() {
               )}
             </select>
           </label>
+
+          <InterviewPlanEditor
+            plan={setup.interviewPlan}
+            onChange={(interviewPlan) =>
+              setSetup((current) => ({ ...current, interviewPlan }))
+            }
+          />
 
           <label>
             <span>
@@ -1342,12 +1466,14 @@ export function App() {
                   <select
                     aria-label="Session type"
                     value={editSetup.sessionType}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      const sessionType = event.target.value as SessionType;
                       setEditSetup((current) => ({
                         ...current,
-                        sessionType: event.target.value as SessionType
-                      }))
-                    }
+                        sessionType,
+                        interviewPlan: getDefaultInterviewPlan(sessionType)
+                      }));
+                    }}
                   >
                     {(Object.entries(SESSION_TYPE_LABELS) as [
                       SessionType,
@@ -1358,6 +1484,12 @@ export function App() {
                       </option>
                     ))}
                   </select>
+                  <InterviewPlanEditor
+                    plan={editSetup.interviewPlan}
+                    onChange={(interviewPlan) =>
+                      setEditSetup((current) => ({ ...current, interviewPlan }))
+                    }
+                  />
                   <select
                     aria-label="Interview mode"
                     value={editSetup.interviewMode}
@@ -1526,6 +1658,8 @@ export function App() {
             {isSending ? "Thinking" : activeSession ? "Ready" : "Setup"}
           </div>
         </header>
+
+        {activeSession && <InterviewTimeline session={activeSession} />}
 
         {error && <div className="errorBanner">{error}</div>}
 

@@ -38,6 +38,8 @@ export interface Session {
   companyName: string;
   sessionType: SessionType;
   interviewMode: InterviewMode;
+  interviewPlan: InterviewPlan;
+  interviewProgress: InterviewProgress;
   createdAt: string;
   updatedAt: string;
 }
@@ -56,4 +58,22 @@ export interface SessionSummary {
   strengths: string;
   improvementAreas: string;
   updatedAt: string;
+}
+
+export interface InterviewStage {
+  id: string;
+  label: string;
+  objective: string;
+  questionCount: number;
+  enabled: boolean;
+}
+
+export interface InterviewPlan {
+  stages: InterviewStage[];
+}
+
+export interface InterviewProgress {
+  stageIndex: number;
+  questionInStage: number;
+  completed: boolean;
 }
