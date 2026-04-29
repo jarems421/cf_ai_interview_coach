@@ -127,7 +127,7 @@ If you change the Worker URL, update `apps/web/.env.production` before redeployi
 ## Live Demo
 
 - App: https://cf-ai-interview-coach-bml.pages.dev
-- Worker API health: https://cf-ai-interview-coach-api.jarems421.workers.dev/api/health
+- Worker API health: https://cf-ai-interview-coach-public-api.jarems421.workers.dev/api/health
 
 The frontend production build uses `apps/web/.env.production` so deployed Pages requests go to the live Worker API.
 
