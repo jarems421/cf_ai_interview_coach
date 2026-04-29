@@ -798,6 +798,10 @@ button {
   margin: 0 32px 28px;
 }
 
+.composer textarea {
+  padding-right: 108px;
+}
+
 .guidedActions {
   display: grid;
   gap: 10px;
@@ -897,11 +901,9 @@ button {
 }
 
 .sendButton {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
   width: 40px;
   height: 40px;
+  flex: 0 0 40px;
   display: grid;
   place-items: center;
   border-radius: 8px;

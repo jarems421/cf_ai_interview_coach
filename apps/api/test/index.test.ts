@@ -248,6 +248,29 @@ describe("worker", () => {
     expect(calls.some((call) => call.params.includes("assistant"))).toBe(true);
   });
 
+  it("streams chat replies when requested", async () => {
+    const { env, calls, aiCalls } = createChatEnv();
+    const response = await worker.fetch(
+      new Request("https://example.com/api/chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream" },
+        body: JSON.stringify({
+          clientId: "browser-1",
+          sessionId: "session-1",
+          message: "I led a migration project.",
+          stream: true
+        })
+      }),
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toContain("text/event-stream");
+    await expect(response.text()).resolves.toContain("event: done");
+    expect(aiCalls).toHaveLength(1);
+    expect(calls.some((call) => call.params.includes("assistant"))).toBe(true);
+  });
+
   it("runs quick actions without storing them as user turns", async () => {
     const { env, calls, aiCalls } = createChatEnv();
     const response = await worker.fetch(

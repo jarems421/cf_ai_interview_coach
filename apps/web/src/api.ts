@@ -189,3 +189,120 @@ export async function sendChatMessage(input: {
     body: JSON.stringify(input)
   });
 }
+
+export async function streamChatMessage(
+  input: {
+    clientId: string;
+    sessionId: string;
+    message: string;
+    action?:
+      | "message"
+      | "first_question"
+      | "next_question"
+      | "technical_question"
+      | "tailored_question"
+      | "rubric_score"
+      | "scorecard"
+      | "improve_answer"
+      | "generate_report";
+  },
+  onDelta: (text: string) => void
+) {
+  let response: Response;
+
+  try {
+    response = await fetch(`${API_BASE}/api/chat`, {
+      method: "POST",
+      headers: {
+        Accept: "text/event-stream",
+        "Content-Type": "application/json"
+      },
+      credentials: "include",
+      body: JSON.stringify({ ...input, stream: true })
+    });
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new Error(
+        "Could not reach the API. Check the Worker URL, CORS settings, and whether Cloudflare Access is blocking the request."
+      );
+    }
+
+    throw error;
+  }
+
+  const contentType = response.headers.get("Content-Type");
+  if (!response.ok || !contentType?.includes("text/event-stream")) {
+    const result = await parseResponse<{ reply: string }>(response);
+    onDelta(result.reply);
+    return result;
+  }
+
+  if (!response.body) {
+    throw new Error("The API did not open a streaming response.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let reply = "";
+  let doneReply = "";
+  let streamError = "";
+
+  function consumeEvent(eventText: string) {
+    const eventName =
+      eventText
+        .split(/\r?\n/)
+        .find((line) => line.startsWith("event:"))
+        ?.slice(6)
+        .trim() ?? "message";
+    const data = eventText
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+      .join("\n")
+      .trim();
+
+    if (!data) {
+      return;
+    }
+
+    const parsed = JSON.parse(data) as Partial<{ text: string; reply: string; error: string }>;
+
+    if (eventName === "delta" && typeof parsed.text === "string") {
+      reply += parsed.text;
+      onDelta(parsed.text);
+    } else if (eventName === "done" && typeof parsed.reply === "string") {
+      doneReply = parsed.reply;
+    } else if (eventName === "error") {
+      streamError = parsed.error ?? "Could not stream the coaching reply.";
+    }
+  }
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundaryMatch = /\r?\n\r?\n/.exec(buffer);
+    while (boundaryMatch) {
+      const eventText = buffer.slice(0, boundaryMatch.index);
+      buffer = buffer.slice(boundaryMatch.index + boundaryMatch[0].length);
+      consumeEvent(eventText);
+      boundaryMatch = /\r?\n\r?\n/.exec(buffer);
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    consumeEvent(buffer);
+  }
+
+  if (streamError) {
+    throw new Error(streamError);
+  }
+
+  return { reply: doneReply || reply };
+}

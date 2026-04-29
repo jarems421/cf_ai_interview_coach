@@ -43,7 +43,7 @@ import {
   deleteSession,
   listMessages,
   listSessions,
-  sendChatMessage,
+  streamChatMessage,
   updateSession
 } from "./api";
 import { extractResumeText } from "./resume";
@@ -530,6 +530,7 @@ export function App() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSavingSession, setIsSavingSession] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [streamingMessageId, setStreamingMessageId] = useState<number | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -908,6 +909,7 @@ export function App() {
     }
 
     let optimisticId: number | null = null;
+    const streamingId = Date.now() * -1 - 1;
 
     if (action === "message") {
       const nextOptimisticId = Date.now() * -1;
@@ -926,28 +928,48 @@ export function App() {
     }
 
     setIsSending(true);
+    setStreamingMessageId(streamingId);
+    setMessages((current) => [
+      ...current,
+      {
+        id: streamingId,
+        sessionId: activeSessionId,
+        role: "assistant",
+        content: "",
+        createdAt: new Date().toISOString()
+      }
+    ]);
     setError(null);
 
     try {
-      const result = await sendChatMessage({
-        clientId,
-        sessionId: activeSessionId,
-        message: content,
-        action
-      });
-
-      setMessages((current) => [
-        ...current,
+      const result = await streamChatMessage(
         {
-          id: Date.now(),
+          clientId,
           sessionId: activeSessionId,
-          role: "assistant",
-          content: result.reply,
-          createdAt: new Date().toISOString()
+          message: content,
+          action
+        },
+        (delta) => {
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === streamingId
+                ? { ...message, content: `${message.content}${delta}` }
+                : message
+            )
+          );
         }
-      ]);
+      );
+
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === streamingId ? { ...message, content: result.reply } : message
+        )
+      );
       void refreshSessions(activeSessionId);
     } catch (caught) {
+      setMessages((current) =>
+        current.filter((message) => message.id !== streamingId)
+      );
       if (optimisticId) {
         setMessages((current) =>
           current.filter((message) => message.id !== optimisticId)
@@ -957,6 +979,7 @@ export function App() {
       setError(caught instanceof Error ? caught.message : "Could not send message.");
     } finally {
       setIsSending(false);
+      setStreamingMessageId(null);
     }
   }
 
@@ -1536,21 +1559,36 @@ export function App() {
               )}
             </div>
           ) : (
-            messages.map((message) => (
-              <article className={`message ${message.role}`} key={message.id}>
-                <div className="messageAvatar">
-                  {message.role === "assistant" ? (
-                    <Bot size={18} aria-hidden="true" />
-                  ) : (
-                    <UserRound size={18} aria-hidden="true" />
-                  )}
-                </div>
-                <MarkdownMessage content={message.content} />
-              </article>
-            ))
+            messages.map((message) => {
+              const isStreamingAssistant = message.id === streamingMessageId;
+
+              return (
+                <article
+                  className={`message ${message.role} ${
+                    isStreamingAssistant && !message.content ? "pending" : ""
+                  }`}
+                  key={message.id}
+                >
+                  <div className="messageAvatar">
+                    {message.role === "assistant" ? (
+                      <Bot size={18} aria-hidden="true" />
+                    ) : (
+                      <UserRound size={18} aria-hidden="true" />
+                    )}
+                  </div>
+                  <MarkdownMessage
+                    content={
+                      isStreamingAssistant && !message.content
+                        ? "Reviewing your answer..."
+                        : message.content
+                    }
+                  />
+                </article>
+              );
+            })
           )}
 
-          {isSending && (
+          {isSending && streamingMessageId === null && (
             <article className="message assistant pending">
               <div className="messageAvatar">
                 <Loader2 className="spin" size={18} aria-hidden="true" />

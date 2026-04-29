@@ -1,4 +1,4 @@
-function corsHeaders(request?: Request) {
+export function corsHeaders(request?: Request) {
   const origin = request?.headers.get("Origin") ?? "*";
 
   return {

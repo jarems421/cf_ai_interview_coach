@@ -14,7 +14,11 @@ type AiResult = {
     response?: string;
     choices?: Array<{ message?: { content?: string }; text?: string }>;
   };
-  choices?: Array<{ message?: { content?: string }; text?: string }>;
+  choices?: Array<{
+    delta?: { content?: string };
+    message?: { content?: string };
+    text?: string;
+  }>;
 };
 
 export function extractAiText(result: unknown) {
@@ -36,6 +40,22 @@ export function extractAiText(result: unknown) {
 
 export async function generateCoachReply(input: {
   ai: Ai;
+  session: Session;
+  summary?: SessionSummary | null;
+  messages: Message[];
+  instruction?: string;
+}) {
+  const result = await input.ai.run(MODEL, buildCoachAiInput(input));
+  const reply = extractAiText(result);
+
+  if (!reply) {
+    throw new Error("Workers AI returned an empty response.");
+  }
+
+  return reply;
+}
+
+export function buildCoachAiInput(input: {
   session: Session;
   summary?: SessionSummary | null;
   messages: Message[];
@@ -70,19 +90,119 @@ export async function generateCoachReply(input: {
       : [])
   ];
 
-  const result = await input.ai.run(MODEL, {
+  return {
     messages,
     max_tokens: 430,
     temperature: 0.38
-  });
+  };
+}
+
+export async function generateCoachReplyStream(input: {
+  ai: Ai;
+  session: Session;
+  summary?: SessionSummary | null;
+  messages: Message[];
+  instruction?: string;
+}) {
+  const result = (await input.ai.run(MODEL, {
+    ...buildCoachAiInput(input),
+    stream: true
+  })) as unknown;
+
+  if (result instanceof ReadableStream) {
+    return result;
+  }
+
+  if (result instanceof Response && result.body) {
+    return result.body;
+  }
 
   const reply = extractAiText(result);
-
   if (!reply) {
     throw new Error("Workers AI returned an empty response.");
   }
 
-  return reply;
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(
+        new TextEncoder().encode(`data: ${JSON.stringify({ response: reply })}\n\n`)
+      );
+      controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+      controller.close();
+    }
+  });
+}
+
+export function extractAiStreamDelta(payload: unknown) {
+  if (typeof payload === "string") {
+    return payload;
+  }
+
+  const output = payload as AiResult;
+  const text =
+    output.response ??
+    output.result?.response ??
+    output.choices?.[0]?.delta?.content ??
+    output.choices?.[0]?.message?.content ??
+    output.choices?.[0]?.text ??
+    output.result?.choices?.[0]?.message?.content ??
+    output.result?.choices?.[0]?.text;
+
+  return typeof text === "string" ? text : "";
+}
+
+export async function consumeAiEventStream(
+  stream: ReadableStream<Uint8Array>,
+  onDelta: (text: string) => void
+) {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  function consumeEvent(eventText: string) {
+    const data = eventText
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+      .join("\n")
+      .trim();
+
+    if (!data || data === "[DONE]") {
+      return;
+    }
+
+    try {
+      const delta = extractAiStreamDelta(JSON.parse(data));
+      if (delta) {
+        onDelta(delta);
+      }
+    } catch {
+      onDelta(data);
+    }
+  }
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundaryMatch = /\r?\n\r?\n/.exec(buffer);
+    while (boundaryMatch) {
+      const boundary = boundaryMatch.index;
+      const eventText = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + boundaryMatch[0].length);
+      consumeEvent(eventText);
+      boundaryMatch = /\r?\n\r?\n/.exec(buffer);
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    consumeEvent(buffer);
+  }
 }
 
 export async function generateUpdatedSummary(input: {

@@ -14,11 +14,14 @@ import {
 } from "./db";
 import { getAuthLinks, getRequestUser } from "./auth";
 import {
+  consumeAiEventStream,
   generateCoachReply,
+  generateCoachReplyStream,
   generateUpdatedSummary,
   shouldUpdateSummary
 } from "./ai";
 import {
+  corsHeaders,
   HttpError,
   json,
   noContent,
@@ -26,7 +29,14 @@ import {
   readJson,
   requireString
 } from "./http";
-import type { Env, InterviewMode, SessionType } from "./types";
+import type {
+  Env,
+  InterviewMode,
+  Message,
+  Session,
+  SessionSummary,
+  SessionType
+} from "./types";
 
 type CreateSessionBody = {
   clientId?: unknown;
@@ -45,6 +55,7 @@ type ChatBody = {
   sessionId?: unknown;
   message?: unknown;
   action?: unknown;
+  stream?: unknown;
 };
 
 type UpdateSessionBody = {
@@ -240,6 +251,154 @@ Next Practice Plan:
   return message;
 }
 
+function wantsStream(request: Request, body: ChatBody) {
+  return (
+    body.stream === true ||
+    request.headers.get("Accept")?.includes("text/event-stream") === true
+  );
+}
+
+function writeSse(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  event: string,
+  data: unknown
+) {
+  controller.enqueue(
+    new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+  );
+}
+
+function eventStreamResponse(
+  request: Request,
+  stream: ReadableStream<Uint8Array>
+) {
+  return new Response(stream, {
+    headers: {
+      ...corsHeaders(request),
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform"
+    }
+  });
+}
+
+function streamStaticReply(request: Request, reply: string) {
+  return eventStreamResponse(
+    request,
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        writeSse(controller, "delta", { text: reply });
+        writeSse(controller, "done", { reply });
+        controller.close();
+      }
+    })
+  );
+}
+
+async function maybeUpdateSummary(input: {
+  env: Env;
+  action: ChatAction;
+  sessionId: string;
+  summary: SessionSummary | null;
+  recentMessages: Message[];
+  reply: string;
+}) {
+  const updatedRecentMessages = [
+    ...input.recentMessages,
+    {
+      id: Number.MAX_SAFE_INTEGER,
+      sessionId: input.sessionId,
+      role: "assistant" as const,
+      content: input.reply,
+      createdAt: new Date().toISOString()
+    }
+  ];
+
+  const userTurnCount =
+    input.action === "message"
+      ? await countUserMessages(input.env.DB, input.sessionId)
+      : 0;
+
+  if (!shouldUpdateSummary(userTurnCount)) {
+    return;
+  }
+
+  try {
+    const updatedSummary = await generateUpdatedSummary({
+      ai: input.env.AI,
+      current: input.summary,
+      messages: updatedRecentMessages
+    });
+
+    await upsertSummary(input.env.DB, {
+      sessionId: input.sessionId,
+      ...updatedSummary
+    });
+  } catch (summaryError) {
+    console.warn("Summary update skipped", summaryError);
+  }
+}
+
+function streamCoachReply(input: {
+  request: Request;
+  env: Env;
+  sessionId: string;
+  session: Session;
+  summary: SessionSummary | null;
+  recentMessages: Message[];
+  action: ChatAction;
+  instruction?: string;
+}) {
+  return eventStreamResponse(
+    input.request,
+    new ReadableStream<Uint8Array>({
+      async start(controller) {
+        let reply = "";
+
+        try {
+          const aiStream = await generateCoachReplyStream({
+            ai: input.env.AI,
+            session: input.session,
+            summary: input.summary,
+            messages: input.recentMessages,
+            instruction: input.instruction
+          });
+
+          await consumeAiEventStream(aiStream, (text) => {
+            reply += text;
+            writeSse(controller, "delta", { text });
+          });
+
+          const trimmedReply = reply.trim();
+          if (!trimmedReply) {
+            throw new Error("Workers AI returned an empty response.");
+          }
+
+          await addMessage(input.env.DB, input.sessionId, "assistant", trimmedReply);
+          await maybeUpdateSummary({
+            env: input.env,
+            action: input.action,
+            sessionId: input.sessionId,
+            summary: input.summary,
+            recentMessages: input.recentMessages,
+            reply: trimmedReply
+          });
+
+          writeSse(controller, "done", { reply: trimmedReply });
+        } catch (error) {
+          writeSse(controller, "error", {
+            error:
+              error instanceof Error
+                ? error.message
+                : "Could not stream the coaching reply."
+          });
+        } finally {
+          controller.close();
+        }
+      }
+    })
+  );
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method === "OPTIONS") {
@@ -384,6 +543,7 @@ export default {
 
       if (url.pathname === "/api/chat" && request.method === "POST") {
         const body = await readJson<ChatBody>(request);
+        const streamRequested = wantsStream(request, body);
         const user = await getRequestUser(request, env, body.clientId);
         assertChatRateLimit(user.id);
         const sessionId = requireString(body.sessionId, "sessionId");
@@ -418,14 +578,30 @@ export default {
             action === "generate_report") &&
           !hasCandidateAnswer
         ) {
-          return json(
-            {
-              reply:
-                "I need at least one candidate answer before I can do that. Answer the current interview question first, then I can score or improve it."
-            },
-            {},
-            request
-          );
+          const reply =
+            "I need at least one candidate answer before I can do that. Answer the current interview question first, then I can score or improve it.";
+
+          return streamRequested
+            ? streamStaticReply(request, reply)
+            : json({ reply }, {}, request);
+        }
+
+        const instruction =
+          action === "message"
+            ? undefined
+            : buildActionInstruction(action, message, session);
+
+        if (streamRequested) {
+          return streamCoachReply({
+            request,
+            env,
+            sessionId,
+            session,
+            summary,
+            recentMessages,
+            action,
+            instruction
+          });
         }
 
         const reply = await generateCoachReply({
@@ -433,44 +609,18 @@ export default {
           session,
           summary,
           messages: recentMessages,
-          instruction:
-            action === "message"
-              ? undefined
-              : buildActionInstruction(action, message, session)
+          instruction
         });
 
         await addMessage(env.DB, sessionId, "assistant", reply);
-
-        const updatedRecentMessages = [
-          ...recentMessages,
-          {
-            id: Number.MAX_SAFE_INTEGER,
-            sessionId,
-            role: "assistant" as const,
-            content: reply,
-            createdAt: new Date().toISOString()
-          }
-        ];
-
-        const userTurnCount =
-          action === "message" ? await countUserMessages(env.DB, sessionId) : 0;
-
-        if (shouldUpdateSummary(userTurnCount)) {
-          try {
-            const updatedSummary = await generateUpdatedSummary({
-              ai: env.AI,
-              current: summary,
-              messages: updatedRecentMessages
-            });
-
-            await upsertSummary(env.DB, {
-              sessionId,
-              ...updatedSummary
-            });
-          } catch (summaryError) {
-            console.warn("Summary update skipped", summaryError);
-          }
-        }
+        await maybeUpdateSummary({
+          env,
+          action,
+          sessionId,
+          summary,
+          recentMessages,
+          reply
+        });
 
         return json({ reply }, {}, request);
       }
