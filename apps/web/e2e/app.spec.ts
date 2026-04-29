@@ -87,6 +87,24 @@ test("shows signed-in onboarding and creates a tailored session", async ({ page 
     });
   });
 
+  await page.addInitScript(() => {
+    class MockSpeechRecognition {
+      lang = "";
+      interimResults = false;
+      maxAlternatives = 1;
+      onresult = null;
+      onerror = null;
+      onend = null;
+      start() {}
+      stop() {}
+    }
+
+    Object.defineProperty(window, "webkitSpeechRecognition", {
+      configurable: true,
+      value: MockSpeechRecognition
+    });
+  });
+
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "Create Profile" })).toBeVisible();
@@ -139,4 +157,11 @@ test("shows signed-in onboarding and creates a tailored session", async ({ page 
   ).toBeVisible();
   await expect(page.getByRole("button", { name: /technical drill/i })).toBeVisible();
   await expect(page.getByText("Scenario-based question")).toBeVisible();
+
+  const voiceBox = await page.getByRole("button", { name: "Start voice input" }).boundingBox();
+  const sendBox = await page.getByRole("button", { name: "Send message" }).boundingBox();
+
+  expect(voiceBox).not.toBeNull();
+  expect(sendBox).not.toBeNull();
+  expect(voiceBox!.x + voiceBox!.width).toBeLessThanOrEqual(sendBox!.x);
 });
