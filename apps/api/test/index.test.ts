@@ -83,6 +83,7 @@ function createChatEnv(
     companyName: "",
     sessionType: "quick_practice" as const,
     interviewMode: "behavioural" as const,
+    rubricPreset: "behavioral" as const,
     interviewPlan: getDefaultInterviewPlan("quick_practice"),
     interviewProgress: getInitialInterviewProgress(),
     createdAt: new Date(0).toISOString(),
@@ -208,6 +209,7 @@ describe("worker", () => {
       "",
       "quick_practice",
       "behavioural",
+      "behavioral",
       expect.stringContaining("Warm-up"),
       JSON.stringify({ stageIndex: 0, questionInStage: 0, completed: false })
     ]);
@@ -395,8 +397,8 @@ describe("worker", () => {
     ).toBe(false);
   });
 
-  it("supports generate report command", async () => {
-    const { env, aiCalls } = createChatEnv();
+  it("supports generate report command and stores the report", async () => {
+    const { env, calls, aiCalls } = createChatEnv();
     const response = await worker.fetch(
       new Request("https://example.com/api/chat", {
         method: "POST",
@@ -411,6 +413,13 @@ describe("worker", () => {
 
     expect(response.status).toBe(200);
     expect(aiCalls).toHaveLength(1);
+    expect(aiCalls[0]).toMatchObject({ max_tokens: 1100 });
+    expect(calls.some((call) => call.sql.includes("INSERT INTO session_reports"))).toBe(
+      true
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      reportId: expect.any(String)
+    });
   });
 
   it("does not generate report before the candidate answers", async () => {
@@ -485,6 +494,7 @@ describe("worker", () => {
       "Cloudflare",
       "full_mock",
       "technical",
+      "technical",
       expect.stringContaining("Role depth"),
       JSON.stringify({ stageIndex: 0, questionInStage: 0, completed: false })
     ]);
@@ -556,6 +566,7 @@ describe("worker", () => {
       companyName: "Cloudflare",
       sessionType: "technical_screen",
       interviewMode: "technical",
+      rubricPreset: "cybersecurity",
       interviewPlan: getDefaultInterviewPlan("technical_screen"),
       interviewProgress: getInitialInterviewProgress(),
       createdAt: new Date(0).toISOString(),

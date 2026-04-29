@@ -900,6 +900,150 @@ button {
   padding-right: 108px;
 }
 
+.completionPanel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 32px 14px;
+  border: 1px solid var(--pill-border);
+  border-radius: 8px;
+  padding: 13px 14px;
+  background: var(--pill-bg);
+}
+
+.completionPanel div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.completionPanel span,
+.reportPreviewHeader span,
+.reportListHeader {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.completionPanel strong,
+.reportPreviewHeader strong {
+  color: var(--text-soft);
+  font-size: 0.95rem;
+}
+
+.completionPanel button {
+  min-height: 38px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 0 12px;
+  color: var(--button-text);
+  background: var(--button);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.completionPanel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.reportLibrary {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(160px, 240px) minmax(0, 1fr);
+  gap: 12px;
+  padding: 0 32px 14px;
+}
+
+.reportList,
+.reportPreview {
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.reportList {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 10px;
+}
+
+.reportListHeader {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 2px 4px;
+}
+
+.reportList button {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  border-radius: 7px;
+  padding: 9px;
+  color: var(--text-soft);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.reportList button.active,
+.reportList button:hover {
+  background: var(--selected);
+}
+
+.reportList button strong,
+.reportList button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reportList button strong {
+  font-size: 0.84rem;
+}
+
+.reportList button span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.reportPreview {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  max-height: 340px;
+  overflow: auto;
+}
+
+.reportPreviewHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.reportPreviewHeader div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.reportPreview .messageContent {
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
 .guidedActions {
   display: grid;
   gap: 10px;
@@ -1099,21 +1243,32 @@ button {
   .chatHeader,
   .transcript,
   .guidedActions,
+  .reportLibrary,
   .interviewTimeline {
     padding-left: 20px;
     padding-right: 20px;
   }
 
   .composer,
+  .completionPanel,
   .errorBanner {
     margin-left: 20px;
     margin-right: 20px;
+  }
+
+  .reportLibrary {
+    grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 560px) {
   .chatHeader {
     align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .completionPanel {
+    align-items: stretch;
     flex-direction: column;
   }
 

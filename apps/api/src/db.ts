@@ -3,6 +3,7 @@ import type {
   InterviewMode,
   Message,
   Session,
+  SessionReport,
   SessionSummary,
   SessionType
 } from "./types";
@@ -12,6 +13,7 @@ import {
   normalizeInterviewPlan,
   normalizeInterviewProgress
 } from "./interviewPlan";
+import { normalizeRubricPreset } from "./rubrics";
 
 type SessionRow = {
   id: string;
@@ -24,10 +26,21 @@ type SessionRow = {
   companyName: string;
   sessionType: SessionType;
   interviewMode: InterviewMode;
+  rubricPreset: string;
   interviewPlan: string;
   interviewProgress: string;
   createdAt: string;
   updatedAt: string;
+};
+
+type ReportRow = {
+  id: string;
+  sessionId: string;
+  clientId: string;
+  title: string;
+  content: string;
+  rubricPreset: string;
+  createdAt: string;
 };
 
 type MessageRow = {
@@ -62,10 +75,28 @@ function mapSessionRow(row: SessionRow): Session {
 
   return {
     ...row,
+    rubricPreset: normalizeRubricPreset(
+      row.rubricPreset,
+      row.sessionType,
+      row.interviewMode,
+      row.role,
+      row.focus
+    ),
     interviewPlan,
     interviewProgress: normalizeInterviewProgress(
       parseJson(row.interviewProgress),
       interviewPlan
+    )
+  };
+}
+
+function mapReportRow(row: ReportRow): SessionReport {
+  return {
+    ...row,
+    rubricPreset: normalizeRubricPreset(
+      row.rubricPreset,
+      "quick_practice",
+      "behavioural"
     )
   };
 }
@@ -110,6 +141,7 @@ export async function createSession(
     | "companyName"
     | "sessionType"
     | "interviewMode"
+    | "rubricPreset"
     | "interviewPlan"
   >
 ) {
@@ -119,8 +151,9 @@ export async function createSession(
     .prepare(
       `INSERT INTO sessions
         (id, client_id, user_id, role, level, focus, cv_text, job_description,
-         company_name, session_type, interview_mode, interview_plan, interview_progress)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         company_name, session_type, interview_mode, rubric_preset, interview_plan,
+         interview_progress)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       id,
@@ -134,6 +167,7 @@ export async function createSession(
       input.companyName,
       input.sessionType,
       input.interviewMode,
+      input.rubricPreset,
       serializePlan(input),
       serializeProgress()
     )
@@ -163,6 +197,7 @@ export async function updateSession(
     | "companyName"
     | "sessionType"
     | "interviewMode"
+    | "rubricPreset"
     | "interviewPlan"
   >
 ) {
@@ -177,6 +212,7 @@ export async function updateSession(
            company_name = ?,
            session_type = ?,
            interview_mode = ?,
+           rubric_preset = ?,
            interview_plan = ?,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`
@@ -190,6 +226,7 @@ export async function updateSession(
       input.companyName,
       input.sessionType,
       input.interviewMode,
+      input.rubricPreset,
       serializePlan(input),
       sessionId
     )
@@ -207,6 +244,7 @@ export async function listSessions(db: D1Database, clientId: string) {
               cv_text AS cvText, job_description AS jobDescription,
               company_name AS companyName, session_type AS sessionType,
               interview_mode AS interviewMode,
+              rubric_preset AS rubricPreset,
               interview_plan AS interviewPlan, interview_progress AS interviewProgress,
               created_at AS createdAt, updated_at AS updatedAt
        FROM sessions
@@ -226,6 +264,7 @@ export async function getSession(db: D1Database, sessionId: string) {
               cv_text AS cvText, job_description AS jobDescription,
               company_name AS companyName, session_type AS sessionType,
               interview_mode AS interviewMode,
+              rubric_preset AS rubricPreset,
               interview_plan AS interviewPlan, interview_progress AS interviewProgress,
               created_at AS createdAt, updated_at AS updatedAt
        FROM sessions
@@ -235,6 +274,67 @@ export async function getSession(db: D1Database, sessionId: string) {
     .first<SessionRow>();
 
   return row ? mapSessionRow(row) : null;
+}
+
+export async function createSessionReport(
+  db: D1Database,
+  input: Pick<
+    SessionReport,
+    "sessionId" | "clientId" | "title" | "content" | "rubricPreset"
+  >
+) {
+  const id = crypto.randomUUID();
+
+  await db
+    .prepare(
+      `INSERT INTO session_reports
+        (id, session_id, client_id, title, content, rubric_preset)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      id,
+      input.sessionId,
+      input.clientId,
+      input.title,
+      input.content,
+      input.rubricPreset
+    )
+    .run();
+
+  return id;
+}
+
+export async function listSessionReports(db: D1Database, sessionId: string) {
+  const result = await db
+    .prepare(
+      `SELECT id, session_id AS sessionId, client_id AS clientId,
+              title, content, rubric_preset AS rubricPreset,
+              created_at AS createdAt
+       FROM session_reports
+       WHERE session_id = ?
+       ORDER BY created_at DESC`
+    )
+    .bind(sessionId)
+    .all<ReportRow>();
+
+  return (result.results ?? []).map(mapReportRow) satisfies SessionReport[];
+}
+
+export async function listClientReports(db: D1Database, clientId: string) {
+  const result = await db
+    .prepare(
+      `SELECT id, session_id AS sessionId, client_id AS clientId,
+              title, content, rubric_preset AS rubricPreset,
+              created_at AS createdAt
+       FROM session_reports
+       WHERE client_id = ?
+       ORDER BY created_at DESC
+       LIMIT 30`
+    )
+    .bind(clientId)
+    .all<ReportRow>();
+
+  return (result.results ?? []).map(mapReportRow) satisfies SessionReport[];
 }
 
 export async function updateInterviewProgress(

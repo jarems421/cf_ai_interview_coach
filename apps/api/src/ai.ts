@@ -44,6 +44,7 @@ export async function generateCoachReply(input: {
   summary?: SessionSummary | null;
   messages: Message[];
   instruction?: string;
+  maxTokens?: number;
 }) {
   const result = await input.ai.run(MODEL, buildCoachAiInput(input));
   const reply = extractAiText(result);
@@ -60,6 +61,7 @@ export function buildCoachAiInput(input: {
   summary?: SessionSummary | null;
   messages: Message[];
   instruction?: string;
+  maxTokens?: number;
 }) {
   const messages: AiMessage[] = [
     { role: "system", content: COACH_SYSTEM_PROMPT },
@@ -92,7 +94,7 @@ export function buildCoachAiInput(input: {
 
   return {
     messages,
-    max_tokens: 430,
+    max_tokens: input.maxTokens ?? 430,
     temperature: 0.38
   };
 }
@@ -103,6 +105,7 @@ export async function generateCoachReplyStream(input: {
   summary?: SessionSummary | null;
   messages: Message[];
   instruction?: string;
+  maxTokens?: number;
 }) {
   const result = (await input.ai.run(MODEL, {
     ...buildCoachAiInput(input),

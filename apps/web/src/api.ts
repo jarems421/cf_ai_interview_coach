@@ -4,7 +4,9 @@ import type {
   InterviewPlan,
   Message,
   ResumeExtractResult,
+  RubricPreset,
   Session,
+  SessionReport,
   SessionType
 } from "./types";
 
@@ -96,6 +98,7 @@ export async function createSession(input: {
   companyName?: string;
   sessionType?: SessionType;
   interviewMode?: InterviewMode;
+  rubricPreset?: RubricPreset;
   interviewPlan?: InterviewPlan;
 }) {
   return requestJson<{ sessionId: string }>(`${API_BASE}/api/sessions`, {
@@ -132,6 +135,7 @@ export async function updateSession(input: {
   companyName?: string;
   sessionType?: SessionType;
   interviewMode?: InterviewMode;
+  rubricPreset?: RubricPreset;
   interviewPlan?: InterviewPlan;
 }) {
   return requestJson<{ ok: true }>(
@@ -154,6 +158,17 @@ export async function extractResume(input: { clientId: string; file: File }) {
     method: "POST",
     credentials: "include",
     body: formData
+  });
+}
+
+export async function listReports(clientId: string, sessionId?: string) {
+  const params = new URLSearchParams({ clientId });
+  const path = sessionId
+    ? `${API_BASE}/api/sessions/${sessionId}/reports?${params}`
+    : `${API_BASE}/api/reports?${params}`;
+
+  return requestJson<{ reports: SessionReport[] }>(path, {
+    credentials: "include"
   });
 }
 
@@ -198,7 +213,7 @@ export async function sendChatMessage(input: {
     | "improve_answer"
     | "generate_report";
 }) {
-  return requestJson<{ reply: string }>(`${API_BASE}/api/chat`, {
+  return requestJson<{ reply: string; reportId?: string | null }>(`${API_BASE}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",

@@ -27,6 +27,15 @@ export type InterviewMode =
   | "weakness_gap"
   | "final_simulation";
 
+export type RubricPreset =
+  | "behavioral"
+  | "technical"
+  | "system_design"
+  | "leadership"
+  | "company_motivation"
+  | "cybersecurity"
+  | "project_defence";
+
 export interface Session {
   id: string;
   clientId: string;
@@ -38,6 +47,7 @@ export interface Session {
   companyName: string;
   sessionType: SessionType;
   interviewMode: InterviewMode;
+  rubricPreset: RubricPreset;
   interviewPlan: InterviewPlan;
   interviewProgress: InterviewProgress;
   createdAt: string;
@@ -76,4 +86,14 @@ export interface InterviewProgress {
   stageIndex: number;
   questionInStage: number;
   completed: boolean;
+}
+
+export interface SessionReport {
+  id: string;
+  sessionId: string;
+  clientId: string;
+  title: string;
+  content: string;
+  rubricPreset: RubricPreset;
+  createdAt: string;
 }

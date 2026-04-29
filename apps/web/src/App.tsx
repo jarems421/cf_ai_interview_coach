@@ -43,6 +43,7 @@ import {
   deleteSession,
   extractResume,
   listMessages,
+  listReports,
   listSessions,
   streamChatMessage,
   updateSession
@@ -58,11 +59,18 @@ import {
   getRoleSuggestionOptions,
   type SuggestionOption
 } from "./suggestions";
+import {
+  getDefaultRubricPreset,
+  RUBRIC_LABELS,
+  RUBRIC_OPTIONS
+} from "./rubrics";
 import type {
   InterviewMode,
   InterviewPlan,
   Message,
+  RubricPreset,
   Session,
+  SessionReport,
   SessionType
 } from "./types";
 
@@ -75,6 +83,7 @@ type SetupForm = {
   companyName: string;
   sessionType: SessionType;
   interviewMode: InterviewMode;
+  rubricPreset: RubricPreset;
   interviewPlan: InterviewPlan;
 };
 
@@ -118,6 +127,7 @@ const defaultSetup: SetupForm = {
   companyName: "",
   sessionType: "quick_practice",
   interviewMode: "behavioural",
+  rubricPreset: "behavioral",
   interviewPlan: getDefaultInterviewPlan("quick_practice")
 };
 
@@ -509,6 +519,68 @@ function InterviewTimeline({ session }: { session: Session }) {
   );
 }
 
+function ReportLibrary({
+  reports,
+  activeReportId,
+  onSelect,
+  onExport
+}: {
+  reports: SessionReport[];
+  activeReportId: string | null;
+  onSelect: (reportId: string) => void;
+  onExport: (report: SessionReport) => void;
+}) {
+  if (reports.length === 0) {
+    return null;
+  }
+
+  const activeReport = reports.find((report) => report.id === activeReportId) ?? reports[0];
+
+  return (
+    <section className="reportLibrary" aria-label="Saved reports">
+      <div className="reportList">
+        <div className="reportListHeader">
+          <FileText size={16} aria-hidden="true" />
+          <span>Reports</span>
+        </div>
+        {reports.map((report) => (
+          <button
+            className={report.id === activeReport.id ? "active" : undefined}
+            key={report.id}
+            type="button"
+            onClick={() => onSelect(report.id)}
+          >
+            <strong>{report.title}</strong>
+            <span>
+              {RUBRIC_LABELS[report.rubricPreset]} /{" "}
+              {new Date(report.createdAt).toLocaleDateString()}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <article className="reportPreview">
+        <div className="reportPreviewHeader">
+          <div>
+            <span>{RUBRIC_LABELS[activeReport.rubricPreset]} report</span>
+            <strong>{activeReport.title}</strong>
+          </div>
+          <button
+            className="secondaryIconButton"
+            type="button"
+            onClick={() => onExport(activeReport)}
+            aria-label="Export report"
+            title="Export report"
+          >
+            <Download size={17} aria-hidden="true" />
+          </button>
+        </div>
+        <MarkdownMessage content={activeReport.content} />
+      </article>
+    </section>
+  );
+}
+
 function parseInlineMarkdown(text: string): InlinePart[] {
   const parts: InlinePart[] = [];
   const pattern = /(\*\*[^*]+\*\*|`[^`]+`)/g;
@@ -615,6 +687,8 @@ export function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [reports, setReports] = useState<SessionReport[]>([]);
+  const [activeReportId, setActiveReportId] = useState<string | null>(null);
   const [setup, setSetup] = useState(defaultSetup);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editSetup, setEditSetup] = useState(defaultSetup);
@@ -837,6 +911,8 @@ export function App() {
       } else {
         setActiveSessionId(null);
         setMessages([]);
+        setReports([]);
+        setActiveReportId(null);
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load sessions.");
@@ -857,11 +933,28 @@ export function App() {
       const result = await listMessages(clientId, sessionId);
       setMessages(result.messages);
       setActiveSessionId(sessionId);
+      await refreshReports(sessionId);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load messages.");
     } finally {
       setIsLoadingMessages(false);
     }
+  }
+
+  async function refreshReports(sessionId = activeSessionId ?? "") {
+    if (!account || !sessionId) {
+      setReports([]);
+      setActiveReportId(null);
+      return;
+    }
+
+    const result = await listReports(clientId, sessionId);
+    setReports(result.reports);
+    setActiveReportId((current) =>
+      current && result.reports.some((report) => report.id === current)
+        ? current
+        : result.reports[0]?.id ?? null
+    );
   }
 
   async function handleCreateSession(event: FormEvent<HTMLFormElement>) {
@@ -893,10 +986,11 @@ export function App() {
       cvText: session.cvText,
       jobDescription: session.jobDescription,
       companyName: session.companyName,
-      sessionType: session.sessionType,
-      interviewMode: session.interviewMode,
-      interviewPlan: session.interviewPlan
-    });
+        sessionType: session.sessionType,
+        interviewMode: session.interviewMode,
+        rubricPreset: session.rubricPreset,
+        interviewPlan: session.interviewPlan
+      });
   }
 
   async function handleUpdateSession(event: FormEvent<HTMLFormElement>) {
@@ -921,6 +1015,7 @@ export function App() {
         companyName: editSetup.companyName,
         sessionType: editSetup.sessionType,
         interviewMode: editSetup.interviewMode,
+        rubricPreset: editSetup.rubricPreset,
         interviewPlan: editSetup.interviewPlan
       });
       setEditingSessionId(null);
@@ -993,6 +1088,8 @@ export function App() {
       if (activeSessionId === sessionId) {
         setActiveSessionId(null);
         setMessages([]);
+        setReports([]);
+        setActiveReportId(null);
       }
 
       await refreshSessions();
@@ -1080,6 +1177,9 @@ export function App() {
           message.id === streamingId ? { ...message, content: result.reply } : message
         )
       );
+      if (action === "generate_report") {
+        await refreshReports(activeSessionId);
+      }
       void refreshSessions(activeSessionId);
     } catch (caught) {
       setMessages((current) =>
@@ -1139,6 +1239,16 @@ export function App() {
     URL.revokeObjectURL(url);
   }
 
+  function exportReport(report: SessionReport) {
+    const blob = new Blob([report.content], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `interview-report-${report.id}.md`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   function toggleVoiceInput() {
     if (!SpeechRecognitionAPI) {
       return;
@@ -1173,6 +1283,8 @@ export function App() {
     setAccount(null);
     setSessions([]);
     setMessages([]);
+    setReports([]);
+    setActiveReportId(null);
     setActiveSessionId(null);
     setError(null);
   }
@@ -1274,6 +1386,12 @@ export function App() {
                 setSetup((current) => ({
                   ...current,
                   sessionType,
+                  rubricPreset: getDefaultRubricPreset({
+                    role: current.role,
+                    focus: current.focus,
+                    sessionType,
+                    interviewMode: current.interviewMode
+                  }),
                   interviewPlan: getDefaultInterviewPlan(sessionType)
                 }));
               }}
@@ -1302,12 +1420,19 @@ export function App() {
             </span>
             <select
               value={setup.interviewMode}
-              onChange={(event) =>
+              onChange={(event) => {
+                const interviewMode = event.target.value as InterviewMode;
                 setSetup((current) => ({
                   ...current,
-                  interviewMode: event.target.value as InterviewMode
-                }))
-              }
+                  interviewMode,
+                  rubricPreset: getDefaultRubricPreset({
+                    role: current.role,
+                    focus: current.focus,
+                    sessionType: current.sessionType,
+                    interviewMode
+                  })
+                }));
+              }}
             >
               {(Object.entries(INTERVIEW_MODE_LABELS) as [InterviewMode, string][]).map(
                 ([value, label]) => (
@@ -1316,6 +1441,28 @@ export function App() {
                   </option>
                 )
               )}
+            </select>
+          </label>
+
+          <label>
+            <span>
+              <Star size={16} aria-hidden="true" />
+              Scoring rubric
+            </span>
+            <select
+              value={setup.rubricPreset}
+              onChange={(event) =>
+                setSetup((current) => ({
+                  ...current,
+                  rubricPreset: event.target.value as RubricPreset
+                }))
+              }
+            >
+              {RUBRIC_OPTIONS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -1471,6 +1618,12 @@ export function App() {
                       setEditSetup((current) => ({
                         ...current,
                         sessionType,
+                        rubricPreset: getDefaultRubricPreset({
+                          role: current.role,
+                          focus: current.focus,
+                          sessionType,
+                          interviewMode: current.interviewMode
+                        }),
                         interviewPlan: getDefaultInterviewPlan(sessionType)
                       }));
                     }}
@@ -1493,17 +1646,40 @@ export function App() {
                   <select
                     aria-label="Interview mode"
                     value={editSetup.interviewMode}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      const interviewMode = event.target.value as InterviewMode;
                       setEditSetup((current) => ({
                         ...current,
-                        interviewMode: event.target.value as InterviewMode
-                      }))
-                    }
+                        interviewMode,
+                        rubricPreset: getDefaultRubricPreset({
+                          role: current.role,
+                          focus: current.focus,
+                          sessionType: current.sessionType,
+                          interviewMode
+                        })
+                      }));
+                    }}
                   >
                     {(Object.entries(INTERVIEW_MODE_LABELS) as [
                       InterviewMode,
                       string
                     ][]).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label="Scoring rubric"
+                    value={editSetup.rubricPreset}
+                    onChange={(event) =>
+                      setEditSetup((current) => ({
+                        ...current,
+                        rubricPreset: event.target.value as RubricPreset
+                      }))
+                    }
+                  >
+                    {RUBRIC_OPTIONS.map(([value, label]) => (
                       <option key={value} value={value}>
                         {label}
                       </option>
@@ -1731,6 +1907,30 @@ export function App() {
             </article>
           )}
         </div>
+
+        {activeSession?.interviewProgress.completed && reports.length === 0 && (
+          <section className="completionPanel" aria-label="Interview complete">
+            <div>
+              <span>Interview complete</span>
+              <strong>Generate the final coaching report for CV and job-fit feedback.</strong>
+            </div>
+            <button
+              type="button"
+              onClick={() => void sendContent("", "generate_report")}
+              disabled={isSending || !lastUserMessage}
+            >
+              <ClipboardCheck size={17} aria-hidden="true" />
+              Generate report
+            </button>
+          </section>
+        )}
+
+        <ReportLibrary
+          reports={reports}
+          activeReportId={activeReportId}
+          onSelect={setActiveReportId}
+          onExport={exportReport}
+        />
 
         <div className="guidedActions" aria-label="Guided coaching actions">
           <div className="guidedActionsHeader">

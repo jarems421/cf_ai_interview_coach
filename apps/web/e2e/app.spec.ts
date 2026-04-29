@@ -41,6 +41,7 @@ test.beforeEach(async ({ page }) => {
     companyName: "",
     sessionType: "quick_practice",
     interviewMode: "behavioural",
+    rubricPreset: "behavioral",
     interviewPlan: quickPracticePlan,
     interviewProgress: initialProgress
   };
@@ -91,6 +92,7 @@ test.beforeEach(async ({ page }) => {
       jobDescription: string;
       sessionType: string;
       interviewMode: string;
+      rubricPreset: string;
       interviewPlan: { stages: Array<{ label: string; questionCount: number }> };
     };
 
@@ -99,6 +101,7 @@ test.beforeEach(async ({ page }) => {
     expect(body.jobDescription).toContain("Cloudflare");
     expect(body.sessionType).toBe("full_mock");
     expect(body.interviewMode).toBe("technical");
+    expect(body.rubricPreset).toBe("technical");
     expect(body.interviewPlan.stages[0]).toMatchObject({
       label: "Opener",
       questionCount: 2
@@ -127,6 +130,13 @@ test.beforeEach(async ({ page }) => {
         characterCount: 70,
         quality: "warning"
       })
+    });
+  });
+
+  await page.route("**/api/sessions/session-1/reports?**", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ reports: [] })
     });
   });
 });
@@ -188,6 +198,7 @@ test("shows signed-in onboarding and creates a tailored session", async ({ page 
   await page.getByLabel("Session type").selectOption("full_mock");
   await page.locator(".planStageRow input").first().fill("2");
   await page.getByLabel("Interview mode").selectOption("technical");
+  await expect(page.getByLabel("Scoring rubric").first()).toHaveValue("technical");
 
   await page.getByRole("button", { name: /add cv and job description/i }).click();
   await page

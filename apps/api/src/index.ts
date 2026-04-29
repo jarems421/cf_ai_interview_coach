@@ -1,12 +1,15 @@
 import {
   addMessage,
   countUserMessages,
+  createSessionReport,
   createSession,
   deleteSession,
   getSession,
   getSummary,
+  listClientReports,
   listMessages,
   listRecentMessages,
+  listSessionReports,
   listSessions,
   updateInterviewProgress,
   updateSession,
@@ -37,6 +40,7 @@ import {
   requireString
 } from "./http";
 import { extractResumeFile } from "./resume";
+import { getSessionRubric, normalizeRubricPreset } from "./rubrics";
 import type {
   Env,
   InterviewMode,
@@ -56,6 +60,7 @@ type CreateSessionBody = {
   companyName?: unknown;
   sessionType?: unknown;
   interviewMode?: unknown;
+  rubricPreset?: unknown;
   interviewPlan?: unknown;
 };
 
@@ -77,6 +82,7 @@ type UpdateSessionBody = {
   companyName?: unknown;
   sessionType?: unknown;
   interviewMode?: unknown;
+  rubricPreset?: unknown;
   interviewPlan?: unknown;
 };
 
@@ -217,7 +223,11 @@ export function buildActionInstruction(
   }
 
   if (action === "rubric_score") {
-    return `Score the candidate's most recent answer using this rubric. Output in this exact format:
+    const rubric = session ? getSessionRubric(session) : null;
+    return `Score the candidate's most recent answer using the ${rubric?.label ?? "selected"} rubric.
+${rubric?.instruction ?? ""}
+
+Output in this exact format:
 
 RUBRIC SCORE
 ------------
@@ -244,18 +254,45 @@ Follow-up an interviewer might ask: [one realistic follow-up question]`;
   }
 
   if (action === "generate_report") {
-    return `Generate a comprehensive final interview report for this session. Use this format:
+    const rubric = session ? getSessionRubric(session) : null;
+    const cvGuidance = session?.cvText
+      ? "Include CV improvement advice: missing impact, weak bullets to rewrite, projects to expand, tools/skills to foreground, gaps or unclear experience, and 3 suggested CV bullets based on the interview evidence."
+      : "If no CV was provided, include a short section explaining what evidence the candidate should add to their CV from their answers.";
+    const jdGuidance = session?.jobDescription
+      ? "Include job-fit advice: match against role requirements, missing JD keywords or skills, and preparation priorities for this job."
+      : "If no job description was provided, keep job-fit advice role-focused rather than company-specific.";
+    const companyGuidance = session?.companyName
+      ? `Include company-fit advice for ${session.companyName}: motivation, product or mission understanding, and role alignment.`
+      : "If no company was provided, include general company-motivation preparation advice.";
+
+    return `Generate a comprehensive final coaching report for this session using the ${rubric?.label ?? "selected"} rubric.
+${rubric?.instruction ?? ""}
+
+Use the transcript evidence only. Be candid, practical, and specific. Include direct next actions, not vague encouragement.
+${cvGuidance}
+${jdGuidance}
+${companyGuidance}
+
+Use this format:
 
 FINAL SESSION REPORT
 ====================
 
 Overall Performance Score: /10
 
-Best Answer: [quote or describe the candidate's strongest answer and why it worked]
+Rubric Used: ${rubric?.label ?? "Selected rubric"}
 
-Weakest Answer: [quote or describe the weakest answer and the key issue]
+Stage-by-stage Performance:
+[brief bullets for each interview stage that has evidence]
 
-Repeated Issues: [list any patterns that came up across multiple answers]
+Best Answer:
+[quote or describe the candidate's strongest answer and why it worked]
+
+Weakest Answer:
+[quote or describe the weakest answer and the key issue]
+
+Repeated Issues:
+[list any patterns that came up across multiple answers]
 
 STAR Improvements Suggested:
 [list specific STAR format improvements for key answers]
@@ -265,6 +302,12 @@ Technical Depth Rating: /10
 
 Confidence & Clarity Rating: /10
 [brief commentary]
+
+CV Improvements:
+[specific CV changes, missing metrics, projects to expand, and suggested bullets]
+
+Job Fit and Company Prep:
+[specific JD/company alignment feedback and preparation priorities]
 
 Next Practice Plan:
 [3-5 specific, actionable steps the candidate should take before their next interview]`;
@@ -386,6 +429,36 @@ async function maybeAdvanceProgress(input: {
   return nextProgress;
 }
 
+function getReportTitle(session: Session) {
+  const date = new Date().toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric"
+  });
+  return `${session.role} final report - ${date}`;
+}
+
+async function maybeSaveReport(input: {
+  env: Env;
+  session: Session;
+  action: ChatAction;
+  reply: string;
+}) {
+  if (input.action !== "generate_report") {
+    return null;
+  }
+
+  const reportId = await createSessionReport(input.env.DB, {
+    sessionId: input.session.id,
+    clientId: input.session.clientId,
+    title: getReportTitle(input.session),
+    content: input.reply,
+    rubricPreset: input.session.rubricPreset
+  });
+
+  return reportId;
+}
+
 function streamCoachReply(input: {
   request: Request;
   env: Env;
@@ -408,7 +481,8 @@ function streamCoachReply(input: {
             session: input.session,
             summary: input.summary,
             messages: input.recentMessages,
-            instruction: input.instruction
+            instruction: input.instruction,
+            maxTokens: input.action === "generate_report" ? 1100 : undefined
           });
 
           await consumeAiEventStream(aiStream, (text) => {
@@ -422,6 +496,12 @@ function streamCoachReply(input: {
           }
 
           await addMessage(input.env.DB, input.sessionId, "assistant", trimmedReply);
+          const reportId = await maybeSaveReport({
+            env: input.env,
+            session: input.session,
+            action: input.action,
+            reply: trimmedReply
+          });
           await maybeAdvanceProgress({
             env: input.env,
             session: input.session,
@@ -436,7 +516,7 @@ function streamCoachReply(input: {
             reply: trimmedReply
           });
 
-          writeSse(controller, "done", { reply: trimmedReply });
+          writeSse(controller, "done", { reply: trimmedReply, reportId });
         } catch (error) {
           writeSse(controller, "error", {
             error:
@@ -502,6 +582,13 @@ export default {
         const companyName = optionalString(body.companyName, "companyName");
         const sessionType = getSessionType(body.sessionType);
         const interviewMode = getInterviewMode(body.interviewMode);
+        const rubricPreset = normalizeRubricPreset(
+          body.rubricPreset,
+          sessionType,
+          interviewMode,
+          role,
+          focus
+        );
         const interviewPlan = normalizeInterviewPlan(
           body.interviewPlan,
           sessionType
@@ -517,6 +604,7 @@ export default {
           companyName,
           sessionType,
           interviewMode,
+          rubricPreset,
           interviewPlan
         });
 
@@ -557,6 +645,13 @@ export default {
         const companyName = optionalString(body.companyName, "companyName");
         const sessionType = getSessionType(body.sessionType);
         const interviewMode = getInterviewMode(body.interviewMode);
+        const rubricPreset = normalizeRubricPreset(
+          body.rubricPreset,
+          sessionType,
+          interviewMode,
+          role,
+          focus
+        );
         const interviewPlan = normalizeInterviewPlan(
           body.interviewPlan,
           sessionType
@@ -571,6 +666,7 @@ export default {
           companyName,
           sessionType,
           interviewMode,
+          rubricPreset,
           interviewPlan
         });
         return json({ ok: true }, {}, request);
@@ -596,6 +692,40 @@ export default {
       const messagesMatch = url.pathname.match(
         /^\/api\/sessions\/([^/]+)\/messages$/
       );
+
+      const reportsMatch = url.pathname.match(
+        /^\/api\/sessions\/([^/]+)\/reports$/
+      );
+
+      if (url.pathname === "/api/reports" && request.method === "GET") {
+        const user = await getRequestUser(
+          request,
+          env,
+          url.searchParams.get("clientId")
+        );
+        await upsertUser(env.DB, user);
+        return json({ reports: await listClientReports(env.DB, user.id) }, {}, request);
+      }
+
+      if (reportsMatch && request.method === "GET") {
+        const sessionId = decodeURIComponent(reportsMatch[1]);
+        const user = await getRequestUser(
+          request,
+          env,
+          url.searchParams.get("clientId")
+        );
+        const session = await getSession(env.DB, sessionId);
+
+        if (!session || session.clientId !== user.id) {
+          throw new HttpError(404, "Session not found.");
+        }
+
+        return json(
+          { reports: await listSessionReports(env.DB, sessionId) },
+          {},
+          request
+        );
+      }
 
       if (messagesMatch && request.method === "GET") {
         const sessionId = decodeURIComponent(messagesMatch[1]);
@@ -685,10 +815,17 @@ export default {
           session,
           summary,
           messages: recentMessages,
-          instruction
+          instruction,
+          maxTokens: action === "generate_report" ? 1100 : undefined
         });
 
         await addMessage(env.DB, sessionId, "assistant", reply);
+        const reportId = await maybeSaveReport({
+          env,
+          session,
+          action,
+          reply
+        });
         await maybeAdvanceProgress({
           env,
           session,
@@ -703,7 +840,7 @@ export default {
           reply
         });
 
-        return json({ reply }, {}, request);
+        return json({ reply, reportId }, {}, request);
       }
 
       return json({ error: "Not found" }, { status: 404 }, request);
