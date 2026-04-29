@@ -8,24 +8,60 @@ import type {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
-async function parseResponse<T>(response: Response): Promise<T> {
-  let data: (T & { error?: string }) | null = null;
+function isHtmlResponse(contentType: string | null, body: string) {
+  const trimmed = body.trim().toLowerCase();
+  return (
+    contentType?.toLowerCase().includes("text/html") ||
+    trimmed.startsWith("<!doctype html") ||
+    trimmed.startsWith("<html")
+  );
+}
 
+export async function parseResponse<T>(response: Response): Promise<T> {
+  const body = await response.text();
+  const contentType = response.headers.get("Content-Type");
+
+  if (isHtmlResponse(contentType, body)) {
+    throw new Error(
+      "The API returned a sign-in page instead of app data. The live Worker route is probably still protected by Cloudflare Access."
+    );
+  }
+
+  let data: (T & { error?: string }) | null = null;
   try {
-    data = (await response.json()) as T & { error?: string };
+    data = body ? (JSON.parse(body) as T & { error?: string }) : null;
   } catch {
     if (!response.ok) {
       throw new Error(`Request failed with status ${response.status}.`);
     }
 
-    throw new Error("Response was not valid JSON.");
+    throw new Error("The API returned an unreadable response. Please try again.");
   }
 
   if (!response.ok) {
     throw new Error(data?.error ?? "Request failed.");
   }
 
+  if (data === null) {
+    throw new Error("The API returned an empty response. Please try again.");
+  }
+
   return data;
+}
+
+async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit) {
+  try {
+    const response = await fetch(input, init);
+    return await parseResponse<T>(response);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new Error(
+        "Could not reach the API. Check the Worker URL, CORS settings, and whether Cloudflare Access is blocking the request."
+      );
+    }
+
+    throw error;
+  }
 }
 
 export function getClientId() {
@@ -43,10 +79,9 @@ export function getClientId() {
 
 export async function getCurrentUser(clientId: string) {
   const params = new URLSearchParams({ clientId });
-  const response = await fetch(`${API_BASE}/api/me?${params}`, {
+  return requestJson<AuthState>(`${API_BASE}/api/me?${params}`, {
     credentials: "include"
   });
-  return parseResponse<AuthState>(response);
 }
 
 export async function createSession(input: {
@@ -60,31 +95,27 @@ export async function createSession(input: {
   sessionType?: SessionType;
   interviewMode?: InterviewMode;
 }) {
-  const response = await fetch(`${API_BASE}/api/sessions`, {
+  return requestJson<{ sessionId: string }>(`${API_BASE}/api/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
     body: JSON.stringify(input)
   });
-
-  return parseResponse<{ sessionId: string }>(response);
 }
 
 export async function listSessions(clientId: string) {
   const params = new URLSearchParams({ clientId });
-  const response = await fetch(`${API_BASE}/api/sessions?${params}`, {
+  return requestJson<{ sessions: Session[] }>(`${API_BASE}/api/sessions?${params}`, {
     credentials: "include"
   });
-  return parseResponse<{ sessions: Session[] }>(response);
 }
 
 export async function listMessages(clientId: string, sessionId: string) {
   const params = new URLSearchParams({ clientId });
-  const response = await fetch(
+  return requestJson<{ messages: Message[] }>(
     `${API_BASE}/api/sessions/${sessionId}/messages?${params}`,
     { credentials: "include" }
   );
-  return parseResponse<{ messages: Message[] }>(response);
 }
 
 export async function updateSession(input: {
@@ -99,25 +130,35 @@ export async function updateSession(input: {
   sessionType?: SessionType;
   interviewMode?: InterviewMode;
 }) {
-  const response = await fetch(`${API_BASE}/api/sessions/${input.sessionId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify(input)
-  });
-
-  return parseResponse<{ ok: true }>(response);
+  return requestJson<{ ok: true }>(
+    `${API_BASE}/api/sessions/${input.sessionId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(input)
+    }
+  );
 }
 
 export async function deleteSession(clientId: string, sessionId: string) {
   const params = new URLSearchParams({ clientId });
-  const response = await fetch(
-    `${API_BASE}/api/sessions/${sessionId}?${params}`,
-    {
+  let response: Response;
+
+  try {
+    response = await fetch(`${API_BASE}/api/sessions/${sessionId}?${params}`, {
       method: "DELETE",
       credentials: "include"
+    });
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new Error(
+        "Could not reach the API. Check the Worker URL, CORS settings, and whether Cloudflare Access is blocking the request."
+      );
     }
-  );
+
+    throw error;
+  }
 
   if (response.status === 204) {
     return { ok: true };
@@ -141,12 +182,10 @@ export async function sendChatMessage(input: {
     | "improve_answer"
     | "generate_report";
 }) {
-  const response = await fetch(`${API_BASE}/api/chat`, {
+  return requestJson<{ reply: string }>(`${API_BASE}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
     body: JSON.stringify(input)
   });
-
-  return parseResponse<{ reply: string }>(response);
 }

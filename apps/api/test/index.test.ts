@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { getAuthLinks } from "../src/auth";
-import worker, { buildActionInstruction } from "../src/index";
+import worker, {
+  assertChatRateLimit,
+  buildActionInstruction,
+  resetChatRateLimitsForTest
+} from "../src/index";
 import type { Env } from "../src/types";
 
 function createEnv(results: Record<string, unknown[]> = {}) {
@@ -453,5 +457,21 @@ describe("worker", () => {
     expect(buildActionInstruction("technical_question", "")).toContain(
       "tradeoffs"
     );
+  });
+
+  it("rate limits repeated chat requests by profile", () => {
+    resetChatRateLimitsForTest();
+
+    for (let count = 0; count < 30; count += 1) {
+      expect(() => assertChatRateLimit("browser-1", 1_000)).not.toThrow();
+    }
+
+    expect(() => assertChatRateLimit("browser-1", 1_000)).toThrow(
+      "Too many coaching requests"
+    );
+    expect(() => assertChatRateLimit("browser-2", 1_000)).not.toThrow();
+    expect(() => assertChatRateLimit("browser-1", 62_000)).not.toThrow();
+
+    resetChatRateLimitsForTest();
   });
 });

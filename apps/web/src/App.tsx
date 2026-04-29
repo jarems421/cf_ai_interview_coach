@@ -47,6 +47,11 @@ import {
   updateSession
 } from "./api";
 import { extractResumeText } from "./resume";
+import {
+  getBasicSuggestionOptions,
+  getRoleSuggestionOptions,
+  type SuggestionOption
+} from "./suggestions";
 import type {
   InterviewMode,
   Message,
@@ -123,23 +128,6 @@ const INTERVIEW_MODE_LABELS: Record<InterviewMode, string> = {
   weakness_gap: "Weakness / Gap",
   final_simulation: "Final Simulation"
 };
-
-const ROLE_SUGGESTIONS = [
-  "Frontend Engineer",
-  "Backend Engineer",
-  "Full-stack Engineer",
-  "Software Engineer",
-  "Cloudflare Developer",
-  "DevOps Engineer",
-  "Platform Engineer",
-  "Data Engineer",
-  "Product Manager",
-  "Engineering Manager",
-  "Security Engineer",
-  "Solutions Engineer",
-  "Customer Success Manager",
-  "UX Designer"
-];
 
 const LEVEL_SUGGESTIONS = [
   "Entry-level",
@@ -298,7 +286,7 @@ function SignInScreen({
 
   return (
     <main className="signInShell">
-      <section className="signInPanel" aria-label="Sign in">
+      <section className="signInPanel" aria-label="Create profile">
         <div className="brand signInBrand">
           <div className="brandMark">
             <Bot size={24} aria-hidden="true" />
@@ -311,8 +299,10 @@ function SignInScreen({
 
         <form className="signInForm" onSubmit={handleSubmit}>
           <div>
-            <h2>Sign In</h2>
-            <p>Save practice sessions and coaching memory to this browser profile.</p>
+            <h2>Create Profile</h2>
+            <p>
+              Create a browser-backed practice profile. No password required.
+            </p>
           </div>
 
           <label>
@@ -340,7 +330,7 @@ function SignInScreen({
 
           <button className="primaryButton" type="submit">
             <LogIn size={18} aria-hidden="true" />
-            Continue
+            Create profile
           </button>
         </form>
 
@@ -363,17 +353,6 @@ function SignInScreen({
   );
 }
 
-function getFilteredSuggestions(value: string, suggestions: string[]) {
-  const normalized = value.trim().toLowerCase();
-  const matches = normalized
-    ? suggestions.filter((suggestion) =>
-        suggestion.toLowerCase().includes(normalized)
-      )
-    : suggestions;
-
-  return matches.filter((suggestion) => suggestion !== value).slice(0, 5);
-}
-
 function GuidedInput({
   label,
   icon,
@@ -389,14 +368,13 @@ function GuidedInput({
   icon?: ReactNode;
   value: string;
   onChange: (value: string) => void;
-  suggestions: string[];
+  suggestions: SuggestionOption[];
   maxLength?: number;
   required?: boolean;
   placeholder?: string;
   ariaLabel?: string;
 }) {
   const [isFocused, setIsFocused] = useState(false);
-  const filteredSuggestions = getFilteredSuggestions(value, suggestions);
 
   return (
     <label className="guidedField">
@@ -415,20 +393,20 @@ function GuidedInput({
         placeholder={placeholder}
         autoComplete="off"
       />
-      {isFocused && filteredSuggestions.length > 0 && (
+      {isFocused && suggestions.length > 0 && (
         <div className="suggestionList" role="listbox" aria-label={`${label} suggestions`}>
-          {filteredSuggestions.map((suggestion) => (
+          {suggestions.map((suggestion) => (
             <button
-              key={suggestion}
+              key={`${suggestion.label}-${suggestion.value}`}
               type="button"
               role="option"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
-                onChange(suggestion);
+                onChange(suggestion.value);
                 setIsFocused(false);
               }}
             >
-              {suggestion}
+              {suggestion.label}
             </button>
           ))}
         </div>
@@ -1121,7 +1099,7 @@ export function App() {
             icon={<BriefcaseBusiness size={16} aria-hidden="true" />}
             value={setup.role}
             onChange={(role) => setSetup((current) => ({ ...current, role }))}
-            suggestions={ROLE_SUGGESTIONS}
+            suggestions={getRoleSuggestionOptions(setup.role)}
             maxLength={120}
             required
           />
@@ -1131,7 +1109,7 @@ export function App() {
             icon={<UserRound size={16} aria-hidden="true" />}
             value={setup.level}
             onChange={(level) => setSetup((current) => ({ ...current, level }))}
-            suggestions={LEVEL_SUGGESTIONS}
+            suggestions={getBasicSuggestionOptions(setup.level, LEVEL_SUGGESTIONS)}
             maxLength={80}
             required
           />
@@ -1141,7 +1119,7 @@ export function App() {
             icon={<Target size={16} aria-hidden="true" />}
             value={setup.focus}
             onChange={(focus) => setSetup((current) => ({ ...current, focus }))}
-            suggestions={FOCUS_SUGGESTIONS}
+            suggestions={getBasicSuggestionOptions(setup.focus, FOCUS_SUGGESTIONS)}
             maxLength={160}
             required
           />
@@ -1306,7 +1284,7 @@ export function App() {
                     onChange={(role) =>
                       setEditSetup((current) => ({ ...current, role }))
                     }
-                    suggestions={ROLE_SUGGESTIONS}
+                    suggestions={getRoleSuggestionOptions(editSetup.role)}
                     maxLength={120}
                     required
                   />
@@ -1317,7 +1295,10 @@ export function App() {
                     onChange={(level) =>
                       setEditSetup((current) => ({ ...current, level }))
                     }
-                    suggestions={LEVEL_SUGGESTIONS}
+                    suggestions={getBasicSuggestionOptions(
+                      editSetup.level,
+                      LEVEL_SUGGESTIONS
+                    )}
                     maxLength={80}
                     required
                   />
@@ -1328,7 +1309,10 @@ export function App() {
                     onChange={(focus) =>
                       setEditSetup((current) => ({ ...current, focus }))
                     }
-                    suggestions={FOCUS_SUGGESTIONS}
+                    suggestions={getBasicSuggestionOptions(
+                      editSetup.focus,
+                      FOCUS_SUGGESTIONS
+                    )}
                     maxLength={160}
                     required
                   />

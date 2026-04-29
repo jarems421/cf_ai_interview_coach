@@ -89,19 +89,30 @@ test("shows signed-in onboarding and creates a tailored session", async ({ page 
 
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "Sign In" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Create Profile" })).toBeVisible();
   await page.getByLabel("Email").fill("test@example.com");
   await page.getByLabel("Name").fill("Test User");
-  await page.getByRole("button", { name: /continue/i }).click();
+  await page.getByRole("button", { name: /create profile/i }).click();
 
   await expect(page.getByText("Test User")).toBeVisible();
   await expect(
     page.getByText("Welcome back. Set up your next practice session.")
   ).toBeVisible();
 
-  await page.getByLabel("Role").fill("Back");
+  await page.getByRole("textbox", { name: "Role" }).fill("cybersecurity");
+  await expect(
+    page.getByRole("option", { name: "Security Engineer", exact: true })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("option", { name: "Cybersecurity Analyst" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("option", { name: 'Use "cybersecurity"' })
+  ).toBeVisible();
+
+  await page.getByRole("textbox", { name: "Role" }).fill("Back");
   await page.getByRole("option", { name: "Backend Engineer" }).click();
-  await page.getByLabel("Focus").fill("system");
+  await page.getByRole("textbox", { name: "Focus" }).fill("system");
   await page.getByRole("option", { name: "System design and tradeoffs" }).click();
   await page.getByLabel("Interview mode").selectOption("technical");
 

@@ -70,6 +70,36 @@ type ChatAction =
   | "improve_answer"
   | "generate_report";
 
+const chatRateLimitWindowMs = 60_000;
+const chatRateLimitMaxRequests = 30;
+const chatRateLimits = new Map<string, { count: number; resetAt: number }>();
+
+export function assertChatRateLimit(userId: string, now = Date.now()) {
+  const current = chatRateLimits.get(userId);
+
+  if (!current || current.resetAt <= now) {
+    chatRateLimits.set(userId, {
+      count: 1,
+      resetAt: now + chatRateLimitWindowMs
+    });
+    return;
+  }
+
+  if (current.count >= chatRateLimitMaxRequests) {
+    const retrySeconds = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+    throw new HttpError(
+      429,
+      `Too many coaching requests. Try again in ${retrySeconds} seconds.`
+    );
+  }
+
+  current.count += 1;
+}
+
+export function resetChatRateLimitsForTest() {
+  chatRateLimits.clear();
+}
+
 function getChatAction(value: unknown): ChatAction {
   if (
     value === "first_question" ||
@@ -355,6 +385,7 @@ export default {
       if (url.pathname === "/api/chat" && request.method === "POST") {
         const body = await readJson<ChatBody>(request);
         const user = await getRequestUser(request, env, body.clientId);
+        assertChatRateLimit(user.id);
         const sessionId = requireString(body.sessionId, "sessionId");
         const action = getChatAction(body.action);
         const message =
