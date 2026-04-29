@@ -1,0 +1,131 @@
+import { expect, test } from "@playwright/test";
+
+test.beforeEach(async ({ page }) => {
+  let createdSession = false;
+  let createdPayload = {
+    role: "Frontend Engineer",
+    level: "Mid-level",
+    focus: "Behavioral and technical communication",
+    cvText: "React and accessibility experience.",
+    jobDescription: "Cloudflare frontend role.",
+    companyName: "",
+    sessionType: "quick_practice",
+    interviewMode: "behavioural"
+  };
+
+  await page.route("**/api/me?**", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        user: {
+          id: "access:test@example.com",
+          email: "test@example.com",
+          name: "Test User",
+          authenticated: true
+        },
+        loginUrl: "/cdn-cgi/access/login",
+        logoutUrl: "/cdn-cgi/access/logout"
+      })
+    });
+  });
+
+  await page.route("**/api/sessions?**", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        sessions: createdSession
+          ? [
+              {
+                id: "session-1",
+                clientId: "access:test@example.com",
+                ...createdPayload,
+                createdAt: new Date(0).toISOString(),
+                updatedAt: new Date(0).toISOString()
+              }
+            ]
+          : []
+      })
+    });
+  });
+
+  await page.route("**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") {
+      return route.fallback();
+    }
+
+    const body = route.request().postDataJSON() as {
+      role: string;
+      cvText: string;
+      jobDescription: string;
+      interviewMode: string;
+    };
+
+    expect(body.role).toBe("Backend Engineer");
+    expect(body.cvText).toContain("Built APIs in TypeScript");
+    expect(body.jobDescription).toContain("Cloudflare");
+    expect(body.interviewMode).toBe("technical");
+    createdPayload = {
+      ...createdPayload,
+      ...body
+    };
+    createdSession = true;
+
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({ sessionId: "session-1" })
+    });
+  });
+});
+
+test("shows signed-in onboarding and creates a tailored session", async ({ page }) => {
+
+  await page.route("**/api/sessions/session-1/messages?**", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ messages: [] })
+    });
+  });
+
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Sign In" })).toBeVisible();
+  await page.getByLabel("Email").fill("test@example.com");
+  await page.getByLabel("Name").fill("Test User");
+  await page.getByRole("button", { name: /continue/i }).click();
+
+  await expect(page.getByText("Test User")).toBeVisible();
+  await expect(
+    page.getByText("Welcome back. Set up your next practice session.")
+  ).toBeVisible();
+
+  await page.getByLabel("Role").fill("Back");
+  await page.getByRole("option", { name: "Backend Engineer" }).click();
+  await page.getByLabel("Focus").fill("system");
+  await page.getByRole("option", { name: "System design and tradeoffs" }).click();
+  await page.getByLabel("Interview mode").selectOption("technical");
+
+  await page.getByRole("button", { name: /add cv and job description/i }).click();
+  await page
+    .locator('input[type="file"]')
+    .first()
+    .setInputFiles({
+      name: "resume.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Built APIs in TypeScript and improved latency.")
+    });
+  await expect(page.getByText("Loaded resume.txt.")).toBeVisible();
+  await expect(
+    page.getByPlaceholder("Paste your CV or key experience here...")
+  ).toHaveValue(/Built APIs in TypeScript/);
+  await page
+    .getByPlaceholder("Paste the job description here...")
+    .fill("Cloudflare frontend role.");
+  await page.getByRole("button", { name: /new session/i }).click();
+
+  await expect(
+    page.getByText("Send your first answer or ask for a practice question.")
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: /technical drill/i })).toBeVisible();
+  await expect(page.getByText("Scenario-based question")).toBeVisible();
+});
