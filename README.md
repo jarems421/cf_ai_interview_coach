@@ -10,7 +10,7 @@ The app runs structured mock interviews: the AI interviewer asks one question at
 - Coordination: Cloudflare Worker API
 - User input: React chat UI on Cloudflare Pages
 - Memory/state: Cloudflare D1 sessions, messages, and rolling coaching summaries
-- Auth: Cloudflare Access in production, local browser profiles in development
+- Auth: Cloudflare Access in production, browser-backed practice profiles only for local development/demo fallback
 
 ## Why Cloudflare
 
@@ -50,9 +50,9 @@ This project uses Cloudflare Pages for the frontend, Workers for API coordinatio
 - Interviewer persona and difficulty controls for supportive, realistic, strict, standard, challenging, and senior practice.
 - Structured interview plans with stage-aware progress that advances when the AI interviewer asks the next planned question.
 - Adaptive answer handling: vague answers can trigger a coaching pause and retry prompt instead of blindly advancing.
-- Mode-aware scoring tools for rubric scores, scorecards, improving the last answer, and final reports.
+- Mode-aware scoring tools with rubric presets, rubric scores, scorecards, improving the last answer, and final reports.
 - Stronger scenario-based technical interviewing prompts.
-- Evidence-backed end-of-session reports that cite specific answer patterns from the transcript.
+- Stored, evidence-backed end-of-session reports that cite specific answer patterns from the transcript.
 - Rename and delete saved sessions.
 - Markdown export for a session transcript.
 - Local API tests with mocked D1 and mocked Workers AI.
@@ -103,6 +103,8 @@ npm run build
 npm run test:e2e
 ```
 
+These commands are backed by package scripts in `package.json`; `npm run eval` writes the generated evidence files in `docs/evaluation/`.
+
 ## Cloudflare Deployment
 
 Log in to Cloudflare:
@@ -118,6 +120,8 @@ npx wrangler d1 create interview_coach
 ```
 
 Copy the returned `database_id` into the root `wrangler.toml`.
+
+The root `wrangler.toml` and `apps/api/wrangler.toml` should use the same Worker name. This repo currently uses `cf-ai-interview-coach-public-api` in both files so local API commands and root deploys target the same Worker.
 
 Apply the remote migration:
 
@@ -182,6 +186,7 @@ The frontend production build uses `apps/web/.env.production` so deployed Pages 
 ## Project Notes
 
 - In production Access mode, user identity comes from the verified Cloudflare Access token.
+- The frontend still creates a browser `clientId` for local/demo fallback and compatibility, but that value is not trusted as production identity when `AUTH_MODE=access`.
 - Access signing keys are fetched from the team domain and cached by the Worker.
 - In development fallback mode, the app keeps memory per browser profile id and session id.
 - Interview progress is stored in D1 and is advanced by the Worker when the interviewer asks the next planned question.
@@ -200,6 +205,7 @@ The frontend production build uses `apps/web/.env.production` so deployed Pages 
 
 - Add shareable session links with Access-aware permissions.
 - Add more real-world resume fixtures from anonymized PDFs and DOCX files.
+- Add billing, account settings, and SaaS team/workspace management.
 
 ## Useful Cloudflare Docs
 
