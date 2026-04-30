@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev:web": "vite --config apps/web/vite.config.ts",
-    "dev:api": "wrangler dev --local --port 8787",
+    "dev:api": "wrangler dev --config apps/api/wrangler.toml --local --port 8787",
     "build": "npm run build:web",
     "build:web": "vite build --config apps/web/vite.config.ts",
     "preview:web": "vite preview --config apps/web/vite.config.ts",
@@ -14,10 +14,10 @@
     "eval": "node scripts/evaluate.mjs",
     "eval:live": "node scripts/evaluate.mjs --live",
     "test:e2e": "playwright test",
-    "db:local": "wrangler d1 migrations apply interview_coach --local",
-    "db:remote": "wrangler d1 migrations apply interview_coach --remote",
-    "deploy:api": "wrangler deploy",
-    "deploy:web": "npm run build:web && wrangler pages deploy apps/web/dist --project-name cf-ai-interview-coach --branch master"
+    "db:local": "wrangler d1 migrations apply interview_coach --config apps/api/wrangler.toml --local",
+    "db:remote": "wrangler d1 migrations apply interview_coach --config apps/api/wrangler.toml --remote",
+    "deploy:api": "wrangler deploy --config apps/api/wrangler.toml",
+    "deploy:web": "npm run build:web && wrangler pages deploy apps/web/dist --project-name cf-ai-interview-coach"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.1.1",
