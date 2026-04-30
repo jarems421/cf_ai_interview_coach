@@ -14,7 +14,8 @@ produces a final coaching report tailored to the candidate's CV and target role.
 - Coordination: Cloudflare Worker API
 - User input: React chat UI on Cloudflare Pages
 - Memory/state: Cloudflare D1 sessions, messages, and rolling coaching summaries
-- Auth: Cloudflare Access in production, browser-backed practice profiles only for local development/demo fallback
+- Auth: Cloudflare Access in production, browser-backed practice profiles only
+  for local development/demo fallback
 
 ## Why Cloudflare
 
@@ -55,7 +56,8 @@ full-stack AI application without relying on an external LLM API.
 - Cloudflare Access-backed authentication for deployed use, with browser-backed
   practice profiles kept only for local development fallback.
 - Persistent mock interview sessions per authenticated Access user or local development profile.
-- Resume/CV upload for PDF, DOCX, TXT, and Markdown files, with parser warnings and clearer corrupt-file errors.
+- Resume/CV upload for PDF, DOCX, TXT, and Markdown files, with parser
+  warnings and clearer corrupt-file errors.
 - Guided autocomplete for role, level, and focus setup fields.
 - Context-aware coaching with recent chat history and rolling D1 memory.
 - Per-session opt-in cross-session coaching memory, disabled by default for privacy.
@@ -63,10 +65,13 @@ full-stack AI application without relying on an external LLM API.
   strict, standard, challenging, and senior practice.
 - Structured interview plans with stage-aware progress that advances when the AI
   interviewer asks the next planned question.
-- Adaptive answer handling: vague answers can trigger a coaching pause and retry prompt instead of blindly advancing.
-- Mode-aware scoring tools with rubric presets, rubric scores, scorecards, improving the last answer, and final reports.
+- Adaptive answer handling: vague answers can trigger a coaching pause and
+  retry prompt instead of blindly advancing.
+- Mode-aware scoring tools with rubric presets, rubric scores, scorecards,
+  improving the last answer, and final reports.
 - Stronger scenario-based technical interviewing prompts.
-- Stored, evidence-backed end-of-session reports that cite specific answer patterns from the transcript.
+- Stored, evidence-backed end-of-session reports that cite specific answer
+  patterns from the transcript.
 - Rename and delete saved sessions.
 - Markdown export for a session transcript.
 - Local API tests with mocked D1 and mocked Workers AI.
@@ -106,7 +111,8 @@ In another terminal, run the Pages frontend:
 npm run dev:web
 ```
 
-Open `http://localhost:5173`. The Vite dev server proxies `/api` requests to `http://localhost:8787`.
+Open `http://localhost:5173`. The Vite dev server proxies `/api` requests to
+`http://localhost:8787`.
 
 ## Verification
 
@@ -140,7 +146,7 @@ npx wrangler d1 create interview_coach
 Copy the returned `database_id` into the root `wrangler.toml`.
 
 The root `wrangler.toml` and `apps/api/wrangler.toml` should use the same
-Worker name. This repo currently uses `cf-ai-interview-coach-api` in
+Worker name. This repo currently uses `cf-ai-interview-coach-public-api` in
 both files so local API commands and root deploys target the same Worker.
 
 Apply the remote migration:
@@ -202,13 +208,14 @@ If you change the Worker URL, update `apps/web/.env.production` before redeployi
 ## Live Demo
 
 - App: https://cf-ai-interview-coach-bml.pages.dev
-- Worker API: https://cf-ai-interview-coach-api.jarems421.workers.dev
+- Worker API: https://cf-ai-interview-coach-public-api.jarems421.workers.dev
 
 The Worker API, including `/api/health`, is protected by Cloudflare Access in
 production. Direct unauthenticated requests may return a Cloudflare `403`
 before they reach the Worker.
 
-The frontend production build uses `apps/web/.env.production` so deployed Pages requests go to the live Worker API.
+The frontend production build uses `apps/web/.env.production` so deployed Pages
+requests go to the live Worker API.
 
 ## Project Notes
 
@@ -218,7 +225,8 @@ The frontend production build uses `apps/web/.env.production` so deployed Pages 
   `AUTH_MODE=access`.
 - Access signing keys are fetched from the team domain and cached by the Worker.
 - In development fallback mode, the app keeps memory per browser profile id and session id.
-- Interview progress is stored in D1 and is advanced by the Worker when the interviewer asks the next planned question.
+- Interview progress is stored in D1 and is advanced by the Worker when the
+  interviewer asks the next planned question.
 - No app-managed passwords, payments, or external LLM APIs are required for v1.
 - Development prompts and AI prompt text are documented in `PROMPTS.md`.
 
@@ -238,7 +246,8 @@ The frontend production build uses `apps/web/.env.production` so deployed Pages 
 
 ## Useful Cloudflare Docs
 
-- Workers AI Llama 3.3 model: https://developers.cloudflare.com/workers-ai/models/llama-3.3-70b-instruct-fp8-fast/
+- Workers AI Llama 3.3 model:
+  https://developers.cloudflare.com/workers-ai/models/llama-3.3-70b-instruct-fp8-fast/
 - Workers AI bindings: https://developers.cloudflare.com/workers-ai/configuration/bindings/
 - D1 databases: https://developers.cloudflare.com/d1/
 - Pages deployments: https://developers.cloudflare.com/pages/

@@ -110,7 +110,8 @@ modes and rollback.
 
 CV snippet:
 
-> React, TypeScript, accessibility reviews, Cloudflare Workers side projects, and dashboard performance work.
+> React, TypeScript, accessibility reviews, Cloudflare Workers side projects,
+> and dashboard performance work.
 
 Job description snippet:
 
@@ -119,11 +120,14 @@ Job description snippet:
 
 | Question | Generic output target | Tailored output target |
 |----------|-----------------------|------------------------|
-| Q1 | "Tell me about a frontend project you improved." | Ask about dashboard performance work and user impact. |
-| Q2 | "How do you handle technical tradeoffs?" | Ask how they balance accessibility, performance, and release risk. |
-| Q3 | "Describe a time you worked cross-functionally." | Ask how they explained tradeoffs to partners. |
+| Question | Generic target | Tailored target |
+|----------|----------------|-----------------|
+| Q1 | Frontend project improvement | Dashboard performance and user impact |
+| Q2 | Technical tradeoffs | Accessibility, performance, and release risk |
+| Q3 | Cross-functional work | Explaining tradeoffs to partners |
 
-**Expected result:** Tailored questions should reference concrete CV/JD evidence without simply repeating pasted text.
+**Expected result:** Tailored questions should reference concrete CV/JD
+evidence without simply repeating pasted text.
 
 ## 5. Prompt / Model Quality Comparison
 
@@ -134,7 +138,7 @@ Job description snippet:
 | Stage-aware answer prompt | Keeps timeline aligned | Needs completion guards | Current default |
 | Adaptive retry prompt | Blocks vague progress | Needs real-user tuning | Current default |
 | Persona/difficulty prompt | Changes pressure level | Needs more live examples | Current default |
-| `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Fast and structured | Generic when context is thin | Current model |
+| Llama 3.3 70B fast | Fast and structured | Generic when context is thin | Current model |
 
 ## 6. Adaptive Coaching And Memory
 
@@ -142,7 +146,7 @@ Automated deterministic scenarios now cover:
 
 | Scenario | Expected behavior | Result |
 |----------|-------------------|--------|
-| Vague answer retry | Feedback asks the candidate to deepen the same answer and does not advance the stage | Pass |
+| Vague answer retry | Asks candidate to deepen same answer; no stage advance | Pass |
 | Strict persona | Feedback directly challenges vague evidence, ownership, and gaps | Pass |
 | Cross-session memory on | Prompt includes recurring coaching memory and recommendations | Pass |
 | Cross-session memory off | Prompt uses only current session context | Pass |
