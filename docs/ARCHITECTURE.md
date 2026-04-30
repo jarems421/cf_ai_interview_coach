@@ -56,7 +56,7 @@ Production sessions are keyed by the verified Access-derived user id. Spoofed br
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/health` | Health check. |
+| `GET` | `/api/health` | Health check. In production this route is still behind Cloudflare Access. |
 | `GET` | `/api/me` | Returns the authenticated Access user or local development profile details. |
 | `POST` | `/api/sessions` | Creates a session with interview settings and optional CV/JD context. |
 | `GET` | `/api/sessions` | Lists sessions owned by the current user. |

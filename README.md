@@ -56,7 +56,7 @@ This project uses Cloudflare Pages for the frontend, Workers for API coordinatio
 - Rename and delete saved sessions.
 - Markdown export for a session transcript.
 - Local API tests with mocked D1 and mocked Workers AI.
-- Deterministic AI evaluation harness with generated JSON and Markdown results.
+- Deterministic evaluation harness for interview-flow, rubric, report, memory, and feedback-output checks, with optional live API evaluation support.
 - Cost-conscious prompts that keep replies compact and update summary memory every few user turns.
 
 ## Local Setup
@@ -103,7 +103,7 @@ npm run build
 npm run test:e2e
 ```
 
-These commands are backed by package scripts in `package.json`; `npm run eval` writes the generated evidence files in `docs/evaluation/`.
+These commands are backed by package scripts in `package.json`; `npm run eval` writes the generated deterministic evidence files in `docs/evaluation/`. `npm run eval:live` can call a configured live API when the required environment values are present.
 
 ## Cloudflare Deployment
 
@@ -179,7 +179,7 @@ If you change the Worker URL, update `apps/web/.env.production` before redeployi
 - App: https://cf-ai-interview-coach-bml.pages.dev
 - Worker API: https://cf-ai-interview-coach-public-api.jarems421.workers.dev
 
-The Worker API is protected by Cloudflare Access in production. Direct unauthenticated requests may return a Cloudflare `403` before they reach the Worker.
+The Worker API, including `/api/health`, is protected by Cloudflare Access in production. Direct unauthenticated requests may return a Cloudflare `403` before they reach the Worker.
 
 The frontend production build uses `apps/web/.env.production` so deployed Pages requests go to the live Worker API.
 
