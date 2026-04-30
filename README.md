@@ -140,7 +140,7 @@ npx wrangler d1 create interview_coach
 Copy the returned `database_id` into the root `wrangler.toml`.
 
 The root `wrangler.toml` and `apps/api/wrangler.toml` should use the same
-Worker name. This repo currently uses `cf-ai-interview-coach-public-api` in
+Worker name. This repo currently uses `cf-ai-interview-coach-api` in
 both files so local API commands and root deploys target the same Worker.
 
 Apply the remote migration:
@@ -202,7 +202,7 @@ If you change the Worker URL, update `apps/web/.env.production` before redeployi
 ## Live Demo
 
 - App: https://cf-ai-interview-coach-bml.pages.dev
-- Worker API: https://cf-ai-interview-coach-public-api.jarems421.workers.dev
+- Worker API: https://cf-ai-interview-coach-api.jarems421.workers.dev
 
 The Worker API, including `/api/health`, is protected by Cloudflare Access in
 production. Direct unauthenticated requests may return a Cloudflare `403`
