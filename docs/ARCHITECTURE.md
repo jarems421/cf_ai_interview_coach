@@ -1,215 +1,136 @@
 # Architecture
 
-This document describes the full data flow, component structure, and technology choices for the Cloudflare AI Interview Coach.
-
----
+This document describes the main data flow, component structure, and technology choices for the Cloudflare AI Interview Coach.
 
 ## Overview
 
-```
+```text
 Browser (React SPA)
-    │
-    │  HTTPS fetch / form actions
-    ▼
-Cloudflare Workers (API worker)
-    │              │
-    │ Workers AI   │ D1 SQL
-    ▼              ▼
-Llama 3.3 70B   SQLite (D1)
+  -> Cloudflare Pages
+  -> Cloudflare Access, in production
+  -> Cloudflare Worker API
+  -> Workers AI + D1
 ```
 
-The app is a single-page React application deployed on **Cloudflare Pages**. All API calls go to a **Cloudflare Worker** that orchestrates session management, message storage, and LLM inference.
-
----
+The app is a single-page React application deployed on Cloudflare Pages. API calls go to a Cloudflare Worker that verifies identity, owns session and message state, builds interview prompts, and calls Workers AI.
 
 ## Components
 
-### Frontend — `apps/web`
+### Frontend: `apps/web`
 
 | File | Responsibility |
-|------|---------------|
-| `src/App.tsx` | Root component. Manages all application state: sessions, messages, setup form, voice input, timed response indicator, dark/light theme. |
-| `src/api.ts` | Typed wrappers around every backend endpoint (`createSession`, `listSessions`, `deleteSession`, `listMessages`, `sendChatMessage`). |
-| `src/types.ts` | Shared TypeScript types for `Session`, `Message`, `SessionType`, and `InterviewMode`. |
-| `src/styles.css` | Full CSS including CSS custom properties for light/dark theming, layout, and all component styles. |
-| `vite.config.ts` | Vite build configuration. Production API URL is injected via `VITE_API_BASE_URL`. |
+|------|----------------|
+| `src/App.tsx` | Root UI, session setup/edit forms, chat, timeline, guided actions, auth/profile state. |
+| `src/api.ts` | Typed API wrappers for sessions, messages, chat, resume extraction, and auth. |
+| `src/types.ts` | Web-facing TypeScript types for sessions, messages, auth, persona, difficulty, and interview modes. |
+| `src/styles.css` | Layout, theme, form, chat, timeline, and control styling. |
+| `vite.config.ts` | Vite build and local `/api` proxy configuration. |
 
-**Key React state:**
+Key session setup fields include role, level, focus, CV text, job description, company name, session type, interview mode, interviewer persona, difficulty, and the per-session cross-session memory toggle.
 
-| State | Description |
-|-------|-------------|
-| `sessions` | List of sessions fetched from the API for the current `clientId`. |
-| `activeSessionId` | Currently selected session. |
-| `messages` | All messages for the active session. |
-| `setup` | New session form values (role, level, focus, CV, JD, session type, interview mode). |
-| `draft` | Current textarea content. Drives the timed response indicator. |
-| `responseTimerSeconds` | Elapsed seconds since the user started composing an answer. Shown as a `mm:ss` badge. Turns orange at 2 min, red at 3 min. |
-| `isListening` | Whether the Web Speech API is currently recording voice input. |
-
----
-
-### Backend — `apps/api`
+### Backend: `apps/api`
 
 | File | Responsibility |
-|------|---------------|
-| `src/index.ts` | Cloudflare Worker entry point. Routes all HTTP requests, parses bodies, orchestrates DB and AI calls. |
-| `src/db.ts` | All D1 SQL queries: `createSession`, `listSessions`, `getSession`, `deleteSession`, `listMessages`, `listRecentMessages`, `addMessage`, `getSummary`, `upsertSummary`. |
-| `src/ai.ts` | Workers AI calls: `generateCoachReply` (coaching feedback), `generateUpdatedSummary` (memory compression), `shouldUpdateSummary` (trigger logic), `extractAiText` (normalises varied AI response shapes). |
-| `src/prompts.ts` | All prompt construction: `COACH_SYSTEM_PROMPT`, `buildSessionContext` (injects role/level/CV/JD/mode/memory), `buildSummaryPrompt`. |
-| `src/http.ts` | HTTP helpers: `json`, `noContent`, `readJson`, `requireString`, `optionalString`, `HttpError`. |
-| `src/types.ts` | Shared TypeScript types for `Env`, `Session`, `Message`, `SessionSummary`, `SessionType`, `InterviewMode`. |
+|------|----------------|
+| `src/index.ts` | Worker entry point, HTTP routing, auth ownership checks, chat orchestration, interview progress updates. |
+| `src/auth.ts` | Cloudflare Access JWT validation plus explicit development fallback. |
+| `src/db.ts` | D1 queries for sessions, messages, session summaries, reports, and user coaching memory. |
+| `src/ai.ts` | Workers AI calls for coaching replies, summaries, cross-session memory, and streaming. |
+| `src/prompts.ts` | System prompts, session context, persona/difficulty instructions, summary and memory prompts. |
+| `src/interviewPlan.ts` | Structured stage plan, progress helpers, and role-aware question strategy. |
+| `src/resume.ts` | TXT, Markdown, DOCX, and PDF extraction with quality metadata and parser errors. |
+| `src/types.ts` | Shared API types for environment, auth user, session, progress, messages, summaries, and memory. |
 
----
+## Authentication And Ownership
+
+The Worker supports two modes:
+
+| Mode | Use | Behavior |
+|------|-----|----------|
+| `AUTH_MODE=access` | Production | Verifies the Cloudflare Access JWT from `Cf-Access-Jwt-Assertion` or `CF_Authorization`, validates issuer, audience, expiry, and signature, then derives ownership from the Access subject. |
+| `AUTH_MODE=development` | Local development and tests | Allows the browser profile id fallback so local work does not require an Access app. |
+
+Production sessions are keyed by the verified Access-derived user id. Spoofed browser `clientId` values are ignored in Access mode. The local profile fallback is not secure authentication and should only be used for local development.
 
 ## HTTP API
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/health` | Health check. Returns `{ ok: true }`. |
-| `POST` | `/api/sessions` | Create a new session. Accepts role, level, focus, cvText, jobDescription, companyName, sessionType, interviewMode. |
-| `GET` | `/api/sessions?clientId=…` | List all sessions for a client, ordered by most recently updated. |
-| `DELETE` | `/api/sessions/:id?clientId=…` | Delete a session and all its messages. |
-| `GET` | `/api/sessions/:id/messages` | List all messages for a session in chronological order. |
-| `POST` | `/api/chat` | Send a message or trigger a coaching action. Body: `{ clientId, sessionId, message?, action? }`. |
+| `GET` | `/api/health` | Health check. |
+| `GET` | `/api/me` | Returns the authenticated Access user or local development profile details. |
+| `POST` | `/api/sessions` | Creates a session with interview settings and optional CV/JD context. |
+| `GET` | `/api/sessions` | Lists sessions owned by the current user. |
+| `PATCH` | `/api/sessions/:id` | Updates setup fields, persona, difficulty, and memory preference. |
+| `DELETE` | `/api/sessions/:id` | Deletes a session and related data. |
+| `GET` | `/api/sessions/:id/messages` | Lists session messages. |
+| `POST` | `/api/chat` | Sends a candidate answer or runs a coaching action. |
+| `POST` | `/api/resume` | Extracts resume text and metadata from an uploaded file. |
 
-### Chat actions
+Primary interview actions are `first_question`, `message`, and `generate_report`. Rubric scoring, scorecards, and answer improvement remain available as feedback tools and do not advance structured progress.
 
-| Action | Description |
-|--------|-------------|
-| `message` | Candidate free-text answer. Stored as a `user` turn. |
-| `first_question` | Ask the opening interview question. Not stored as a user turn. |
-| `next_question` | Ask the next follow-up question. Not stored as a user turn. |
-| `technical_question` | Ask a technical question appropriate to the role. |
-| `tailored_question` | Generate a question grounded in the candidate's CV and job description. |
-| `rubric_score` | Score the candidate's last answer across six rubric categories. |
-| `scorecard` | High-level interviewer scorecard: readiness, signal, risk, drill. |
-| `improve_answer` | Rewrite the candidate's last answer in STAR format with measurable impact. |
-| `generate_report` | Produce a comprehensive final session report. |
+## Data Model
 
----
+The main D1 tables are:
 
-## Data Model (D1 / SQLite)
+| Table | Purpose |
+|-------|---------|
+| `sessions` | Session setup, owner id, interview progress, persona, difficulty, and cross-session memory preference. |
+| `messages` | User and assistant chat turns. |
+| `session_summaries` | Current-session compressed memory. |
+| `session_reports` | Generated final reports. |
+| `user_coaching_memory` | Opt-in user-level coaching memory across sessions. |
 
-```sql
-sessions (
-  id TEXT PRIMARY KEY,
-  client_id TEXT NOT NULL,
-  role TEXT NOT NULL,
-  level TEXT NOT NULL,
-  focus TEXT NOT NULL,
-  cv_text TEXT NOT NULL DEFAULT '',
-  job_description TEXT NOT NULL DEFAULT '',
-  company_name TEXT NOT NULL DEFAULT '',
-  session_type TEXT NOT NULL DEFAULT 'quick_practice',
-  interview_mode TEXT NOT NULL DEFAULT 'behavioural',
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)
+`user_coaching_memory` stores recurring strengths, recurring weaknesses, preferred role themes, and recommendations. It is read and updated only when the current session has `use_cross_session_memory = 1`.
 
-messages (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  role TEXT NOT NULL,          -- 'user' | 'assistant'
-  content TEXT NOT NULL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)
+## AI Flow
 
-session_summaries (
-  session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-  summary TEXT NOT NULL DEFAULT '',
-  strengths TEXT NOT NULL DEFAULT '',
-  improvement_areas TEXT NOT NULL DEFAULT '',
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-```
+For a normal candidate answer:
 
-`client_id` is a UUID generated in `localStorage` on first visit. There is no authentication — isolation is purely by client ID.
+1. Store the user answer.
+2. Load the session, recent messages, session summary, and optional user coaching memory.
+3. Decide whether the answer is too vague to progress.
+4. Build system context with role, level, focus, CV/JD, interview mode, persona, difficulty, current-session memory, and opt-in cross-session memory.
+5. Ask Workers AI for brief feedback, strongest signal, highest-impact upgrade, and either a retry prompt or exactly one next planned question.
+6. Store the assistant response.
+7. Advance `interview_progress` only when the assistant moves to the next planned question.
+8. Periodically update session summary; update user coaching memory only for opted-in sessions.
 
----
+Final reports are prompted to cite transcript evidence for strongest answer, weakest answer, repeated patterns, role/JD/CV alignment, and the next practice plan.
 
-## AI / LLM Layer
+## Interview Strategy
 
-**Model:** `@cf/meta/llama-3.3-70b-instruct-fp8-fast` via Workers AI.
+The structured plan stays dynamic rather than using a static question bank. Stage instructions adapt by mode:
 
-**Coaching call:**
-1. Build a `system` message from `COACH_SYSTEM_PROMPT`.
-2. Build a second `system` message from `buildSessionContext` (role, level, focus, CV, JD, session type, interview mode, compressed memory).
-3. Append the last 12 messages from D1 as conversation history.
-4. If a non-`message` action was requested, append the action instruction as a final `user` turn.
-5. Call `ai.run(MODEL, { messages, max_tokens: 430, temperature: 0.38 })`.
+| Mode | Strategy |
+|------|----------|
+| `behavioural` | STAR ownership, conflict, impact, learning. |
+| `technical` | Constraints, edge cases, debugging, tradeoffs. |
+| `project_deep_dive` | Architecture, alternatives, failures, metrics. |
+| `company_motivation` | Company knowledge, role fit, practical contribution. |
+| `weakness_gap` | Self-awareness, growth, mitigation, evidence. |
+| `final_simulation` | Mixed realistic final-round pressure. |
 
-**Memory compression (summary):**
-- After every 4 user turns, `generateUpdatedSummary` compresses the conversation into a JSON object `{ summary, strengths, improvementAreas }` using `response_format: { type: "json_object" }`.
-- The summary is upserted into `session_summaries` and injected into every subsequent coaching call to give the model persistent context without unbounded context growth.
-
----
-
-## Session Types and Interview Modes
-
-**Session types** define the overall interview format:
-
-| Value | Label | Behaviour |
-|-------|-------|-----------|
-| `quick_practice` | Quick Practice | One question at a time with instant feedback |
-| `full_mock` | Full Mock Interview | 5–8 questions followed by a final report |
-| `project_defence` | Project Defence | Deep probing questions on a specific project |
-| `technical_screen` | Technical Screen | Practical coding / system design questions |
-| `company_specific` | Company-Specific | Questions tailored to the company and role |
-
-**Interview modes** define the question style injected into the LLM system prompt:
-
-| Value | Label | Focus |
-|-------|-------|-------|
-| `behavioural` | Behavioural | STAR-format real examples |
-| `technical` | Technical | Implementation, system design, trade-offs |
-| `project_deep_dive` | Project Deep-dive | Motivation, design, results, retrospective |
-| `company_motivation` | Company Motivation | Why this company and role specifically |
-| `weakness_gap` | Weakness / Gap | Self-assessment, gaps, growth mindset |
-| `final_simulation` | Final Simulation | Mixed final-round realistic simulation |
-
----
-
-## Deployment
-
-| Service | Platform |
-|---------|----------|
-| React SPA | Cloudflare Pages |
-| API Worker | Cloudflare Workers (ESM format) |
-| Database | Cloudflare D1 (SQLite) |
-| LLM inference | Cloudflare Workers AI |
-
-The Pages project proxies `/api/*` to the Worker via a `_routes.json` or direct binding, so the SPA and API share the same origin in production.
-
-### Environment variables
-
-| Variable | Where | Description |
-|----------|-------|-------------|
-| `VITE_API_BASE_URL` | Pages build | Base URL of the API worker (empty string in same-origin deployments) |
-| `AI` | Worker binding | Workers AI binding |
-| `DB` | Worker binding | D1 database binding |
-
----
+Persona and difficulty controls tune the pressure level without changing the underlying schema.
 
 ## Local Development
 
 ```bash
-npm install           # install all workspace dependencies
-
-npm run dev:api       # start Workers API on http://localhost:8787
-npm run dev:web       # start Vite dev server on http://localhost:5173
-
-npm test              # run Vitest unit tests (api workspace)
+npm install
+npm run db:local
+npm run dev:api
+npm run dev:web
 ```
 
-The web dev server proxies `/api` requests to the local Worker via `vite.config.ts`.
+The Vite dev server proxies `/api` to the local Worker. Use `AUTH_MODE=development` in `.dev.vars` for local browser-profile fallback.
 
----
+## Verification
 
-## Testing
+```bash
+npm run typecheck
+npm test
+npm run eval
+npm run build
+npm run test:e2e
+```
 
-Tests live in `apps/api/test/` and use **Vitest** with a hand-written D1/AI mock.
-
-| File | Coverage |
-|------|---------|
-| `index.test.ts` | All HTTP routes and chat actions: health, session CRUD, chat with all action types, guard rails (no score before answer), delete session, CV/JD fields. |
-| `ai.test.ts` | `extractAiText` (response shape normalisation), `shouldUpdateSummary` (trigger cadence). |
+The deterministic eval harness writes `docs/evaluation/latest-results.json` and `docs/evaluation/latest-summary.md`.

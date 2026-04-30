@@ -6,6 +6,7 @@ import {
   deleteSession,
   getSession,
   getSummary,
+  getUserCoachingMemory,
   listClientReports,
   listMessages,
   listRecentMessages,
@@ -14,7 +15,8 @@ import {
   updateInterviewProgress,
   updateSession,
   upsertSummary,
-  upsertUser
+  upsertUser,
+  upsertUserCoachingMemory
 } from "./db";
 import {
   advanceInterviewProgress,
@@ -28,6 +30,7 @@ import {
   generateCoachReply,
   generateCoachReplyStream,
   generateUpdatedSummary,
+  generateUpdatedUserMemory,
   shouldUpdateSummary
 } from "./ai";
 import {
@@ -43,11 +46,15 @@ import { extractResumeFile } from "./resume";
 import { getSessionRubric, normalizeRubricPreset } from "./rubrics";
 import type {
   Env,
+  InterviewDifficulty,
   InterviewMode,
+  InterviewProgress,
+  InterviewerPersona,
   Message,
   Session,
   SessionSummary,
-  SessionType
+  SessionType,
+  UserCoachingMemory
 } from "./types";
 
 type CreateSessionBody = {
@@ -62,6 +69,9 @@ type CreateSessionBody = {
   interviewMode?: unknown;
   rubricPreset?: unknown;
   interviewPlan?: unknown;
+  useCrossSessionMemory?: unknown;
+  interviewerPersona?: unknown;
+  difficulty?: unknown;
 };
 
 type ChatBody = {
@@ -84,6 +94,9 @@ type UpdateSessionBody = {
   interviewMode?: unknown;
   rubricPreset?: unknown;
   interviewPlan?: unknown;
+  useCrossSessionMemory?: unknown;
+  interviewerPersona?: unknown;
+  difficulty?: unknown;
 };
 
 type ChatAction =
@@ -179,6 +192,26 @@ function getInterviewMode(value: unknown): InterviewMode {
   }
 
   return "behavioural";
+}
+
+function getInterviewerPersona(value: unknown): InterviewerPersona {
+  if (value === "supportive" || value === "strict") {
+    return value;
+  }
+
+  return "realistic";
+}
+
+function getInterviewDifficulty(value: unknown): InterviewDifficulty {
+  if (value === "challenging" || value === "senior") {
+    return value;
+  }
+
+  return "standard";
+}
+
+function getBoolean(value: unknown) {
+  return value === true || value === 1 || value === "true";
 }
 
 export function buildActionInstruction(
@@ -286,10 +319,10 @@ Stage-by-stage Performance:
 [brief bullets for each interview stage that has evidence]
 
 Best Answer:
-[quote or describe the candidate's strongest answer and why it worked]
+[quote or cite the candidate's strongest answer evidence and why it worked]
 
 Weakest Answer:
-[quote or describe the weakest answer and the key issue]
+[quote or cite the weakest answer evidence and the key issue]
 
 Repeated Issues:
 [list any patterns that came up across multiple answers]
@@ -307,13 +340,130 @@ CV Improvements:
 [specific CV changes, missing metrics, projects to expand, and suggested bullets]
 
 Job Fit and Company Prep:
-[specific JD/company alignment feedback and preparation priorities]
+[specific role, JD, CV, and company alignment feedback with transcript evidence]
 
 Next Practice Plan:
 [3-5 specific, actionable steps the candidate should take before their next interview]`;
   }
 
   return message;
+}
+
+function withInterviewProgress(
+  session: Session,
+  interviewProgress: InterviewProgress
+): Session {
+  return {
+    ...session,
+    interviewProgress
+  };
+}
+
+export function answerNeedsCoachingRetry(input: {
+  answer: string;
+  session: Session;
+}) {
+  const normalized = input.answer.trim().toLowerCase();
+  const words = normalized.split(/\s+/).filter(Boolean);
+  const vaguePhrases = [
+    "it went well",
+    "worked hard",
+    "helped out",
+    "various things",
+    "stuff",
+    "things",
+    "good team player"
+  ];
+  const hasVaguePhrase = vaguePhrases.some((phrase) => normalized.includes(phrase));
+  const hasSpecificSignal =
+    /\d/.test(normalized) ||
+    /\b(percent|latency|revenue|users|customers|seconds|minutes|hours|days|engineers|stakeholders|services|requests|errors|reduced|increased|improved|launched|owned|led|designed|built|debugged|migrated)\b/.test(
+      normalized
+    );
+  const technicalSession =
+    input.session.interviewMode === "technical" ||
+    input.session.sessionType === "technical_screen";
+  const hasTechnicalDepth =
+    /\b(constraint|tradeoff|edge case|failure|debug|test|monitor|rollback|scal|latency|cache|database|api|architecture|implementation)\b/.test(
+      normalized
+    );
+  const strictMode =
+    input.session.interviewerPersona === "strict" ||
+    input.session.difficulty === "challenging" ||
+    input.session.difficulty === "senior";
+  const minimumWords = strictMode ? 35 : 24;
+
+  if (words.length < minimumWords || hasVaguePhrase) {
+    return true;
+  }
+
+  if (!hasSpecificSignal) {
+    return true;
+  }
+
+  return technicalSession && strictMode && !hasTechnicalDepth;
+}
+
+function buildCandidateAnswerInstruction(input: {
+  session: Session;
+  answer: string;
+  nextProgress: InterviewProgress;
+  shouldRetry: boolean;
+}) {
+  if (input.shouldRetry) {
+    return (
+      `The candidate's answer is too vague or thin to assess confidently. Pause ` +
+      `the interview instead of moving to the next planned question. Give feedback ` +
+      `in this compact format:\n` +
+      `1. Verdict: say plainly why the answer is not yet interview-ready.\n` +
+      `2. Missing evidence: name the most important missing specifics, metrics, ` +
+      `ownership, constraints, or tradeoffs.\n` +
+      `3. Retry prompt: ask the candidate to answer the same question again with ` +
+      `a concrete example, their specific actions, and measurable or observable ` +
+      `impact.\n\n` +
+      `Do not ask a new interview question yet.\n\n` +
+      `Candidate answer: ${input.answer}`
+    );
+  }
+
+  if (input.session.interviewProgress.completed) {
+    return (
+      `The candidate answered after the structured interview was already complete. ` +
+      `Briefly acknowledge the answer, give one useful coaching note, and invite them ` +
+      `to generate the final report. Do not ask another interview question.\n\n` +
+      `Candidate answer: ${input.answer}`
+    );
+  }
+
+  if (input.nextProgress.completed) {
+    return (
+      `The candidate just answered the final planned interview question. Give feedback ` +
+      `in this compact format:\n` +
+      `1. Verdict: one sentence on how the answer landed.\n` +
+      `2. Strongest signal: the best evidence they gave.\n` +
+      `3. Upgrade: the highest-impact fix, ideally with example wording.\n` +
+      `4. Close: say the structured interview is complete and invite them to generate ` +
+      `the final coaching report.\n\n` +
+      `Do not ask another interview question.\n\n` +
+      `Candidate answer: ${input.answer}`
+    );
+  }
+
+  const nextQuestionSession = withInterviewProgress(
+    input.session,
+    input.nextProgress
+  );
+
+  return (
+    `The candidate just answered the current interview question. Give feedback in ` +
+    `this compact format:\n` +
+    `1. Verdict: one sentence on how the answer landed.\n` +
+    `2. Strongest signal: the best evidence they gave.\n` +
+    `3. Upgrade: the highest-impact fix, ideally with example wording.\n` +
+    `4. Next question: exactly one realistic next interview question.\n\n` +
+    `${buildStageInstruction(nextQuestionSession)}\n\n` +
+    `Candidate answer: ${input.answer}`
+  );
 }
 
 function wantsStream(request: Request, body: ChatBody) {
@@ -362,8 +512,9 @@ function streamStaticReply(request: Request, reply: string) {
 async function maybeUpdateSummary(input: {
   env: Env;
   action: ChatAction;
-  sessionId: string;
+  session: Session;
   summary: SessionSummary | null;
+  userMemory: UserCoachingMemory | null;
   recentMessages: Message[];
   reply: string;
 }) {
@@ -371,7 +522,7 @@ async function maybeUpdateSummary(input: {
     ...input.recentMessages,
     {
       id: Number.MAX_SAFE_INTEGER,
-      sessionId: input.sessionId,
+      sessionId: input.session.id,
       role: "assistant" as const,
       content: input.reply,
       createdAt: new Date().toISOString()
@@ -380,10 +531,10 @@ async function maybeUpdateSummary(input: {
 
   const userTurnCount =
     input.action === "message"
-      ? await countUserMessages(input.env.DB, input.sessionId)
+      ? await countUserMessages(input.env.DB, input.session.id)
       : 0;
 
-  if (!shouldUpdateSummary(userTurnCount)) {
+  if (!shouldUpdateSummary(userTurnCount) && input.action !== "generate_report") {
     return;
   }
 
@@ -395,9 +546,21 @@ async function maybeUpdateSummary(input: {
     });
 
     await upsertSummary(input.env.DB, {
-      sessionId: input.sessionId,
+      sessionId: input.session.id,
       ...updatedSummary
     });
+
+    if (input.session.useCrossSessionMemory) {
+      const updatedUserMemory = await generateUpdatedUserMemory({
+        ai: input.env.AI,
+        current: input.userMemory,
+        messages: updatedRecentMessages
+      });
+      await upsertUserCoachingMemory(input.env.DB, {
+        userId: input.session.clientId,
+        ...updatedUserMemory
+      });
+    }
   } catch (summaryError) {
     console.warn("Summary update skipped", summaryError);
   }
@@ -407,26 +570,14 @@ async function maybeAdvanceProgress(input: {
   env: Env;
   session: Session;
   action: ChatAction;
+  nextProgress?: InterviewProgress;
 }) {
-  if (!shouldAdvanceProgress(input.action)) {
+  if (!shouldAdvanceProgress(input.action) || !input.nextProgress) {
     return input.session.interviewProgress;
   }
 
-  const plan =
-    input.session.interviewPlan ??
-    normalizeInterviewPlan(null, input.session.sessionType);
-  const progress =
-    input.session.interviewProgress ?? {
-      stageIndex: 0,
-      questionInStage: 0,
-      completed: false
-    };
-  const nextProgress = advanceInterviewProgress(
-    progress,
-    plan
-  );
-  await updateInterviewProgress(input.env.DB, input.session.id, nextProgress);
-  return nextProgress;
+  await updateInterviewProgress(input.env.DB, input.session.id, input.nextProgress);
+  return input.nextProgress;
 }
 
 function getReportTitle(session: Session) {
@@ -465,9 +616,11 @@ function streamCoachReply(input: {
   sessionId: string;
   session: Session;
   summary: SessionSummary | null;
+  userMemory: UserCoachingMemory | null;
   recentMessages: Message[];
   action: ChatAction;
   instruction?: string;
+  nextProgress?: InterviewProgress;
 }) {
   return eventStreamResponse(
     input.request,
@@ -480,6 +633,7 @@ function streamCoachReply(input: {
             ai: input.env.AI,
             session: input.session,
             summary: input.summary,
+            userMemory: input.userMemory,
             messages: input.recentMessages,
             instruction: input.instruction,
             maxTokens: input.action === "generate_report" ? 1100 : undefined
@@ -502,21 +656,27 @@ function streamCoachReply(input: {
             action: input.action,
             reply: trimmedReply
           });
-          await maybeAdvanceProgress({
+          const interviewProgress = await maybeAdvanceProgress({
             env: input.env,
             session: input.session,
-            action: input.action
+            action: input.action,
+            nextProgress: input.nextProgress
           });
           await maybeUpdateSummary({
             env: input.env,
             action: input.action,
-            sessionId: input.sessionId,
+            session: input.session,
             summary: input.summary,
+            userMemory: input.userMemory,
             recentMessages: input.recentMessages,
             reply: trimmedReply
           });
 
-          writeSse(controller, "done", { reply: trimmedReply, reportId });
+          writeSse(controller, "done", {
+            reply: trimmedReply,
+            reportId,
+            interviewProgress
+          });
         } catch (error) {
           writeSse(controller, "error", {
             error:
@@ -593,6 +753,9 @@ export default {
           body.interviewPlan,
           sessionType
         );
+        const useCrossSessionMemory = getBoolean(body.useCrossSessionMemory);
+        const interviewerPersona = getInterviewerPersona(body.interviewerPersona);
+        const difficulty = getInterviewDifficulty(body.difficulty);
 
         const sessionId = await createSession(env.DB, {
           clientId: user.id,
@@ -605,7 +768,10 @@ export default {
           sessionType,
           interviewMode,
           rubricPreset,
-          interviewPlan
+          interviewPlan,
+          useCrossSessionMemory,
+          interviewerPersona,
+          difficulty
         });
 
         return json({ sessionId }, { status: 201 }, request);
@@ -656,6 +822,9 @@ export default {
           body.interviewPlan,
           sessionType
         );
+        const useCrossSessionMemory = getBoolean(body.useCrossSessionMemory);
+        const interviewerPersona = getInterviewerPersona(body.interviewerPersona);
+        const difficulty = getInterviewDifficulty(body.difficulty);
 
         await updateSession(env.DB, sessionId, {
           role,
@@ -667,7 +836,10 @@ export default {
           sessionType,
           interviewMode,
           rubricPreset,
-          interviewPlan
+          interviewPlan,
+          useCrossSessionMemory,
+          interviewerPersona,
+          difficulty
         });
         return json({ ok: true }, {}, request);
       }
@@ -768,13 +940,19 @@ export default {
           await addMessage(env.DB, sessionId, "user", message);
         }
 
-        const [summary, recentMessages] = await Promise.all([
+        const [summary, recentMessages, userMemory] = await Promise.all([
           getSummary(env.DB, sessionId),
-          listRecentMessages(env.DB, sessionId)
+          listRecentMessages(env.DB, sessionId),
+          session.useCrossSessionMemory
+            ? getUserCoachingMemory(env.DB, user.id)
+            : Promise.resolve(null)
         ]);
 
         const hasCandidateAnswer = recentMessages.some(
           (recentMessage) => recentMessage.role === "user"
+        );
+        const hasAssistantQuestion = recentMessages.some(
+          (recentMessage) => recentMessage.role === "assistant"
         );
 
         if (
@@ -792,10 +970,39 @@ export default {
             : json({ reply }, {}, request);
         }
 
+        const candidateAnswerProgress =
+          action === "message" && hasAssistantQuestion
+            ? session.interviewProgress.completed
+              ? session.interviewProgress
+              : advanceInterviewProgress(
+                  session.interviewProgress,
+                  session.interviewPlan ??
+                    normalizeInterviewPlan(null, session.sessionType)
+                )
+            : undefined;
+        const shouldRetryAnswer =
+          action === "message" && hasAssistantQuestion
+            ? answerNeedsCoachingRetry({ answer: message, session })
+            : false;
+        const nextProgress =
+          candidateAnswerProgress &&
+          !session.interviewProgress.completed &&
+          !shouldRetryAnswer
+            ? candidateAnswerProgress
+            : undefined;
         const instruction =
-          action === "message"
-            ? undefined
-            : buildActionInstruction(action, message, session);
+          action === "message" && hasAssistantQuestion && candidateAnswerProgress
+            ? buildCandidateAnswerInstruction({
+                session,
+                answer: message,
+                nextProgress: candidateAnswerProgress,
+                shouldRetry: shouldRetryAnswer
+              })
+            : action === "message"
+              ? `${buildActionInstruction("first_question", message, session)}
+
+Candidate wrote before the interview started: ${message}`
+              : buildActionInstruction(action, message, session);
 
         if (streamRequested) {
           return streamCoachReply({
@@ -804,9 +1011,11 @@ export default {
             sessionId,
             session,
             summary,
+            userMemory,
             recentMessages,
             action,
-            instruction
+            instruction,
+            nextProgress
           });
         }
 
@@ -814,6 +1023,7 @@ export default {
           ai: env.AI,
           session,
           summary,
+          userMemory,
           messages: recentMessages,
           instruction,
           maxTokens: action === "generate_report" ? 1100 : undefined
@@ -826,21 +1036,23 @@ export default {
           action,
           reply
         });
-        await maybeAdvanceProgress({
+        const interviewProgress = await maybeAdvanceProgress({
           env,
           session,
-          action
+          action,
+          nextProgress
         });
         await maybeUpdateSummary({
           env,
           action,
-          sessionId,
+          session,
           summary,
+          userMemory,
           recentMessages,
           reply
         });
 
-        return json({ reply, reportId }, {}, request);
+        return json({ reply, reportId, interviewProgress }, {}, request);
       }
 
       return json({ error: "Not found" }, { status: 404 }, request);

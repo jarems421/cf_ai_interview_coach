@@ -286,6 +286,31 @@ export function getCurrentStage(
   return plan.stages[progress.stageIndex] ?? plan.stages[0] ?? null;
 }
 
+function buildRoleStrategy(session: Session) {
+  if (
+    session.sessionType === "technical_screen" ||
+    session.interviewMode === "technical"
+  ) {
+    return "Question strategy: test constraints, edge cases, debugging approach, implementation choices, failure modes, and tradeoffs.";
+  }
+
+  if (
+    session.sessionType === "project_defence" ||
+    session.interviewMode === "project_deep_dive"
+  ) {
+    return "Question strategy: probe architecture, alternatives considered, failures, ownership, measurable outcomes, and lessons learned.";
+  }
+
+  if (
+    session.sessionType === "company_specific" ||
+    session.interviewMode === "company_motivation"
+  ) {
+    return "Question strategy: probe company knowledge, role fit, motivation, product understanding, and practical contribution.";
+  }
+
+  return "Question strategy: probe STAR ownership, conflict, impact, learning, communication, and measurable evidence.";
+}
+
 export function buildStageInstruction(session: Session) {
   const interviewPlan =
     session.interviewPlan ?? getDefaultInterviewPlan(session.sessionType);
@@ -321,14 +346,10 @@ export function buildStageInstruction(session: Session) {
   return `Current interview stage: ${currentStage.label}
 Stage objective: ${currentStage.objective}
 Remaining questions in this stage: ${remaining}
+${buildRoleStrategy(session)}
 Ask exactly one realistic interview question for this stage. ${personalization || "Use the role, level, and focus to personalize the question."} Do not mention that you are following an internal stage plan.`;
 }
 
 export function shouldAdvanceProgress(action: string) {
-  return (
-    action === "first_question" ||
-    action === "next_question" ||
-    action === "technical_question" ||
-    action === "tailored_question"
-  );
+  return action === "message";
 }

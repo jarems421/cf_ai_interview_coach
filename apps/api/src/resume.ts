@@ -9,6 +9,13 @@ export type ResumeExtractResult = {
   fileType: string;
   characterCount: number;
   quality: "good" | "warning";
+  warnings?: string[];
+  pageCount?: number;
+};
+
+type ExtractedResumeText = {
+  text: string;
+  pageCount?: number;
 };
 
 function getExtension(fileName: string) {
@@ -98,42 +105,54 @@ function ensurePdfRuntimeGlobals() {
   }
 }
 
-async function extractPdfText(buffer: ArrayBuffer) {
+async function extractPdfText(buffer: ArrayBuffer): Promise<ExtractedResumeText> {
   ensurePdfRuntimeGlobals();
-  const [pdfjs, pdfWorker] = await Promise.all([
-    import("pdfjs-dist/legacy/build/pdf.mjs"),
-    import("pdfjs-dist/legacy/build/pdf.worker.mjs")
-  ]);
-  (globalThis as unknown as Record<string, unknown>).pdfjsWorker = pdfWorker;
+  try {
+    const [pdfjs, pdfWorker] = await Promise.all([
+      import("pdfjs-dist/legacy/build/pdf.mjs"),
+      import("pdfjs-dist/legacy/build/pdf.worker.mjs")
+    ]);
+    (globalThis as unknown as Record<string, unknown>).pdfjsWorker = pdfWorker;
 
-  const loadingTask = pdfjs.getDocument({
-    data: new Uint8Array(buffer),
-    disableWorker: true,
-    useSystemFonts: true
-  } as object);
-  const pdf = await loadingTask.promise;
-  const pages: string[] = [];
+    const loadingTask = pdfjs.getDocument({
+      data: new Uint8Array(buffer),
+      disableWorker: true,
+      useSystemFonts: true
+    } as object);
+    const pdf = await loadingTask.promise;
+    const pages: string[] = [];
 
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const content = await page.getTextContent();
-    pages.push(
-      content.items
-        .map((item) =>
-          "str" in item && typeof item.str === "string" ? item.str : ""
-        )
-        .join(" ")
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      pages.push(
+        content.items
+          .map((item) =>
+            "str" in item && typeof item.str === "string" ? item.str : ""
+          )
+          .join(" ")
+      );
+    }
+
+    const pageCount = pdf.numPages;
+    await pdf.destroy();
+    return {
+      text: pages.join("\n\n"),
+      pageCount
+    };
+  } catch {
+    throw new HttpError(
+      422,
+      "That PDF could not be parsed. Try DOCX/TXT or paste the CV text."
     );
   }
-
-  await pdf.destroy();
-  return pages.join("\n\n");
 }
 
 function stripXml(value: string) {
   return value
     .replace(/<w:tab\/>/g, " ")
     .replace(/<w:br\/>/g, "\n")
+    .replace(/<\/w:tc>/g, " ")
     .replace(/<\/w:p>/g, "\n")
     .replace(/<[^>]+>/g, "")
     .replace(/&amp;/g, "&")
@@ -143,15 +162,30 @@ function stripXml(value: string) {
     .replace(/&apos;/g, "'");
 }
 
-function extractDocxText(buffer: ArrayBuffer) {
-  const files = unzipSync(new Uint8Array(buffer));
-  const documentNames = Object.keys(files).filter(
-    (name) =>
-      name === "word/document.xml" ||
-      /^word\/(header|footer)\d+\.xml$/.test(name)
-  );
+function extractDocxText(buffer: ArrayBuffer): ExtractedResumeText {
+  try {
+    const files = unzipSync(new Uint8Array(buffer));
+    const documentNames = Object.keys(files).filter(
+      (name) =>
+        name === "word/document.xml" ||
+        /^word\/(header|footer)\d+\.xml$/.test(name)
+    );
 
-  return documentNames.map((name) => stripXml(strFromU8(files[name]))).join("\n\n");
+    if (documentNames.length === 0) {
+      throw new Error("Missing DOCX document XML.");
+    }
+
+    return {
+      text: documentNames
+        .map((name) => stripXml(strFromU8(files[name])))
+        .join("\n\n")
+    };
+  } catch {
+    throw new HttpError(
+      422,
+      "That DOCX could not be parsed. Try PDF/TXT or paste the CV text."
+    );
+  }
 }
 
 export async function extractResumeFile(file: File): Promise<ResumeExtractResult> {
@@ -161,26 +195,32 @@ export async function extractResumeFile(file: File): Promise<ResumeExtractResult
 
   const extension = getExtension(file.name);
   const buffer = await file.arrayBuffer();
-  let text = "";
+  let extracted: ExtractedResumeText;
 
   if (extension === "txt" || extension === "md") {
-    text = new TextDecoder().decode(buffer);
+    extracted = { text: new TextDecoder().decode(buffer) };
   } else if (extension === "pdf") {
-    text = await extractPdfText(buffer);
+    extracted = await extractPdfText(buffer);
   } else if (extension === "docx") {
-    text = extractDocxText(buffer);
+    extracted = extractDocxText(buffer);
   } else {
     throw new HttpError(400, "Upload a PDF, DOCX, TXT, or Markdown resume.");
   }
 
-  const normalized = assertReadableText(text);
+  const normalized = assertReadableText(extracted.text);
   const quality = normalized.length < 600 ? "warning" : "good";
+  const warnings =
+    quality === "warning"
+      ? ["Extracted resume text is short. Review it before starting tailored practice."]
+      : undefined;
 
   return {
     text: normalized,
     fileName: file.name,
     fileType: extension || file.type || "unknown",
     characterCount: normalized.length,
-    quality
+    quality,
+    warnings,
+    pageCount: extracted.pageCount
   };
 }

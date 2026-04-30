@@ -11,6 +11,8 @@
     "preview:web": "vite preview --config apps/web/vite.config.ts",
     "typecheck": "tsc -b",
     "test": "vitest run",
+    "eval": "node scripts/evaluate.mjs",
+    "eval:live": "node scripts/evaluate.mjs --live",
     "test:e2e": "playwright test",
     "db:local": "wrangler d1 migrations apply interview_coach --local",
     "db:remote": "wrangler d1 migrations apply interview_coach --remote",

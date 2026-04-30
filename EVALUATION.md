@@ -1,152 +1,165 @@
 # Evaluation
 
-This document records evaluation tests for the AI Interview Coach — covering feedback quality, rubric scoring, CV tailoring impact, follow-up relevance, and prompt comparisons.
+This document records evaluation checks for AI Interview Coach: structured interview progression, feedback quality, rubric scoring, CV/job-description tailoring, final reports, and resume extraction robustness.
 
----
+Model under test: `@cf/meta/llama-3.3-70b-instruct-fp8-fast`
 
-## Why Evaluate?
+Last manual evaluation update: 30 Apr 2026
 
-This is not just "I used an LLM". The goal is to measure whether the system produces **reliably useful, structured, and personalised feedback**. Each test below is designed to surface concrete signal about where the prompting works well and where it needs improvement.
-
----
-
-## Test 1: Score Consistency
-
-**Goal:** Does the rubric scorer assign consistent scores when given the same answer twice?
-
-**Method:**
-1. Create a session.
-2. Send the same test answer twice in separate turns.
-3. Request `rubric_score` after each.
-4. Compare scores across runs.
-
-**Test Answer:**
-> "In my last role, I led a backend migration from a monolith to microservices. I coordinated with three other engineers, used Kafka for event streaming, and we reduced API latency by 40%. The biggest challenge was managing data consistency during the cutover."
-
-**Expected:** Scores within ±1 on each category across runs.
-
-| Run | Relevance | Specificity | Technical depth | Communication | Evidence | Overall |
-|-----|-----------|-------------|-----------------|---------------|----------|---------|
-| 1   | TBD       | TBD         | TBD             | TBD           | TBD      | TBD     |
-| 2   | TBD       | TBD         | TBD             | TBD           | TBD      | TBD     |
-
----
-
-## Test 2: Rubric vs Basic Prompt Quality
-
-**Goal:** Does structured rubric prompting produce better feedback than a generic prompt?
-
-**Method:**
-1. Run the same answer through the basic `scorecard` action.
-2. Run the same answer through the new `rubric_score` action.
-3. Compare depth, actionability, and specificity of feedback.
-
-| Metric             | Basic Scorecard | Rubric Score |
-|--------------------|-----------------|--------------|
-| Relevance score    | TBD             | TBD          |
-| Specificity score  | TBD             | TBD          |
-| Actionable feedback| TBD             | TBD          |
-| Follow-up quality  | TBD             | TBD          |
-
----
-
-## Test 3: CV + Job Description Tailoring Impact
-
-**Goal:** Does providing a CV and job description produce more relevant interview questions?
-
-**Method:**
-1. Create Session A with no CV or JD (generic).
-2. Create Session B with a realistic CV and JD pasted in.
-3. Request 3 questions from each using `first_question` / `next_question`.
-4. Rate each question's relevance to the specific role (1–10).
-
-**Sample CV snippet:**
-> "Software Engineering Intern with 2 years of experience in Go, Python, and distributed systems. Built a real-time log analysis pipeline processing 50k events/sec."
-
-**Sample JD snippet:**
-> "Cloudflare is looking for a Software Engineering Intern to work on our core network stack. Candidates should be comfortable with Rust or Go, have experience with network protocols, and enjoy debugging hard systems problems."
-
-| Question                | Session A (generic) | Session B (tailored) |
-|-------------------------|---------------------|----------------------|
-| Q1 relevance (1–10)     | TBD                 | TBD                  |
-| Q2 relevance (1–10)     | TBD                 | TBD                  |
-| Q3 relevance (1–10)     | TBD                 | TBD                  |
-| Average                 | TBD                 | TBD                  |
-
----
-
-## Test 4: Follow-up Relevance After Weak Answers
-
-**Goal:** Does the AI ask better follow-up questions after a weak answer vs. a strong one?
-
-**Method:**
-1. Send a weak answer (vague, no specifics).
-2. Send a strong answer (STAR format, measurable impact).
-3. Compare follow-up questions generated in both cases.
-
-**Weak answer:** "I led a project. It went well."
-
-**Strong answer:** "I led a 3-engineer backend migration from PostgreSQL to CockroachDB across 12 production services. We reduced cross-region latency from 380ms to 95ms by co-locating frequently joined tables. The main challenge was preserving serial IDs — we wrote a migration script with dual-write for 72 hours."
-
-| Metric                   | Weak answer follow-up | Strong answer follow-up |
-|--------------------------|----------------------|------------------------|
-| Specificity of follow-up | TBD                  | TBD                    |
-| Probing depth            | TBD                  | TBD                    |
-| Relevance                | TBD                  | TBD                    |
-
----
-
-## Test 5: Session Type Differentiation
-
-**Goal:** Does changing the session type produce meaningfully different questions?
-
-**Method:**
-1. Create 3 sessions with the same role/level but different session types:
-   - Quick Practice
-   - Technical Screen
-   - Project Defence
-2. Request the first question from each.
-3. Classify each question by type (behavioural/technical/project-specific).
-
-| Session type     | First question (summary) | Classification | Appropriate? |
-|------------------|--------------------------|----------------|--------------|
-| Quick Practice   | TBD                      | TBD            | TBD          |
-| Technical Screen | TBD                      | TBD            | TBD          |
-| Project Defence  | TBD                      | TBD            | TBD          |
-
----
-
-## Test 6: Final Report Quality
-
-**Goal:** Does the `generate_report` action produce a genuinely actionable summary?
-
-**Method:**
-1. Complete a 5-turn mock interview.
-2. Request a final report.
-3. Check the report against the checklist below.
-
-**Checklist:**
-- [ ] Includes an overall score
-- [ ] Identifies the best answer
-- [ ] Identifies the weakest answer
-- [ ] Lists at least one repeated issue
-- [ ] Provides STAR-specific improvement suggestions
-- [ ] Includes a next practice plan
-
----
-
-## Recording Results
-
-Run each test, fill in the TBD values, and commit this file with updated results. Use the session IDs and timestamps to reproduce results.
-
----
-
-## How to Run Tests
+Automated deterministic results are generated by:
 
 ```bash
-# Start local dev environment
-npm run dev:api   # Workers API on localhost:8787
-npm run dev:web   # React frontend on localhost:5173
+npm run eval
 ```
 
-Navigate to the app and use the session setup panel to configure each test. Use the quick action buttons to trigger rubric scores, scorecards, and final reports.
+Latest generated artifacts:
+
+- `docs/evaluation/latest-results.json`
+- `docs/evaluation/latest-summary.md`
+
+## 1. Structured Interview Progression
+
+**Goal:** The timeline should follow the AI interviewer, not the prompt buttons.
+
+**Scenario:**
+1. Create a Quick Practice session.
+2. Click `Start interview`.
+3. Answer the opening question in the composer.
+4. Confirm the assistant gives feedback and asks the next planned question.
+5. Confirm the timeline advances without clicking `Continue`.
+
+**Observed result:** The API now returns `interviewProgress` in normal and streaming chat responses. The frontend applies that progress immediately, so the stage bar moves after the assistant asks the next planned question.
+
+| Step | Expected | Result |
+|------|----------|--------|
+| Start interview | Opening question appears | Pass |
+| Submit answer | Feedback plus one next question | Pass |
+| Timeline | Advances from Warm-up to Focused drill | Pass |
+| Score action | Does not advance timeline | Pass |
+
+## 2. Rubric Score Example
+
+**Sample answer:**
+
+> In my last role, I led a backend migration from a monolith to microservices. I coordinated with three engineers, used Kafka for event streaming, and we reduced API latency by 40%. The biggest challenge was managing data consistency during the cutover, so we used dual writes and reconciliation checks for a week.
+
+**Expected rubric behavior:** Strong relevance, specificity, and evidence; technical depth should be good but should ask for more detail on failure modes and rollback.
+
+| Category | Expected score | Rationale |
+|----------|----------------|-----------|
+| Relevance | 9/10 | Directly answers a technical/project question |
+| Specificity | 8/10 | Gives team size, Kafka, latency improvement |
+| Technical depth | 7/10 | Mentions consistency and dual writes but not tradeoffs in depth |
+| Communication | 8/10 | Clear and concise |
+| Evidence/examples | 8/10 | Includes measurable latency result |
+| Overall | 8/10 | Strong answer with room for deeper technical probing |
+
+## 3. Before/After Feedback Quality
+
+**Weak answer:**
+
+> I led a project. It went well and the team was happy.
+
+**Expected feedback:**
+
+- Verdict: Too vague to prove ownership or impact.
+- Strongest signal: Mentions leadership, but without evidence.
+- Upgrade: Add situation, specific actions, measurable result, and a tradeoff.
+- Next question: Ask for a concrete example with scope and outcome.
+
+**Improved answer target:**
+
+> I led a three-person migration of our upload service from synchronous processing to a queue-backed flow. I owned the rollout plan, added dashboards for failure rate and processing time, and coordinated support comms. We reduced timeout-related upload failures by 32% over two releases while keeping rollback available through a feature flag.
+
+**Why this is better:** It has ownership, scope, mechanism, measurement, and risk handling.
+
+## 4. CV And Job Description Tailoring
+
+**Generic session context:** Frontend Engineer, Mid-level, focus on technical communication.
+
+**Tailored context:**
+
+CV snippet:
+
+> React, TypeScript, accessibility reviews, Cloudflare Workers side projects, and dashboard performance work.
+
+Job description snippet:
+
+> Build polished frontend experiences, work across product and platform teams, improve reliability and usability, and communicate tradeoffs clearly.
+
+| Question | Generic output target | Tailored output target |
+|----------|-----------------------|------------------------|
+| Q1 | "Tell me about a frontend project you improved." | "Tell me about the dashboard performance work from your CV and how you validated the user impact." |
+| Q2 | "How do you handle technical tradeoffs?" | "For a Cloudflare frontend surface, how would you balance accessibility, performance, and release risk?" |
+| Q3 | "Describe a time you worked cross-functionally." | "How did you communicate frontend tradeoffs to product or platform partners during the dashboard work?" |
+
+**Expected result:** Tailored questions should reference concrete CV/JD evidence without simply repeating pasted text.
+
+## 5. Prompt / Model Quality Comparison
+
+| Variant | Strengths | Weaknesses | Decision |
+|---------|-----------|------------|----------|
+| Generic chat prompt | Natural conversational feedback | Drifted from the interview plan and could ask untracked follow-ups | Rejected for structured flow |
+| Rubric-only prompt | Consistent scoring format | Felt less like a realistic interview | Kept only for scoring actions |
+| Stage-aware answer prompt | Feedback and next question stay aligned with timeline | Needs careful completion handling to avoid extra final questions | Current default |
+| Adaptive retry prompt | Stops vague answers from counting as progress | Heuristic still needs real-user tuning | Current default for weak answers |
+| Persona/difficulty prompt | Makes supportive, realistic, strict, challenging, and senior practice feel different | Needs more live examples across roles | Current default |
+| `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Fast enough for streaming chat and follows compact structure well | Can still be generic if CV/JD context is thin | Current model |
+
+## 6. Adaptive Coaching And Memory
+
+Automated deterministic scenarios now cover:
+
+| Scenario | Expected behavior | Result |
+|----------|-------------------|--------|
+| Vague answer retry | Feedback asks the candidate to deepen the same answer and does not advance the stage | Pass |
+| Strict persona | Feedback directly challenges vague evidence, ownership, and gaps | Pass |
+| Cross-session memory on | Prompt includes recurring coaching memory and recommendations | Pass |
+| Cross-session memory off | Prompt uses only current session context | Pass |
+| Evidence-based report | Final report requires strongest answer, weakest answer, repeated patterns, alignment, and practice plan with evidence | Pass |
+
+Cross-session memory is per-session opt-in. Sessions with the toggle disabled do not read or update user-level coaching memory.
+
+## 7. Resume Extraction Robustness
+
+Automated coverage in `apps/api/test/index.test.ts` checks:
+
+| File case | Expected behavior | Current coverage |
+|-----------|-------------------|------------------|
+| TXT resume | Extracts readable text | Pass |
+| DOCX resume | Extracts body, table, header, and footer text where available | Pass |
+| PDF resume | Extracts generated readable text and page count | Pass |
+| Multi-page PDF | Extracts combined readable text and `pageCount` | Pass |
+| Unsupported file | Rejects with supported-format message | Pass |
+| Oversized file | Rejects files over 5 MB | Pass |
+| Broken/unreadable text | Rejects unreadable extraction | Pass |
+| Corrupted PDF | Returns clear `422` parse guidance | Pass |
+| Corrupted DOCX | Returns clear `422` parse guidance | Pass |
+| Very short readable resume | Accepts with `warning` quality | Pass |
+
+Manual testing still needed with real-world resumes:
+
+- Multi-column PDFs.
+- PDFs exported from design tools.
+- DOCX files with tables, headers, and footers.
+- Large but valid resumes near the 5 MB limit.
+- Corrupt PDFs/DOCX files in the deployed Worker environment.
+
+## How To Run Checks
+
+```bash
+npm run typecheck
+npm test
+npm run eval
+npm run build
+npm run test:e2e
+```
+
+For manual AI quality checks, run the local API and web app:
+
+```bash
+npm run dev:api
+npm run dev:web
+```
+
+Then create paired sessions with and without CV/JD context and compare the generated questions, rubric scores, and final reports against the examples above.

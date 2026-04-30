@@ -42,6 +42,8 @@ import {
   createSession,
   deleteSession,
   extractResume,
+  getClientId,
+  getCurrentUser,
   listMessages,
   listReports,
   listSessions,
@@ -65,13 +67,16 @@ import {
   RUBRIC_OPTIONS
 } from "./rubrics";
 import type {
+  InterviewDifficulty,
   InterviewMode,
   InterviewPlan,
+  InterviewerPersona,
   Message,
   RubricPreset,
   Session,
   SessionReport,
-  SessionType
+  SessionType,
+  InterviewProgress
 } from "./types";
 
 type SetupForm = {
@@ -85,6 +90,9 @@ type SetupForm = {
   interviewMode: InterviewMode;
   rubricPreset: RubricPreset;
   interviewPlan: InterviewPlan;
+  useCrossSessionMemory: boolean;
+  interviewerPersona: InterviewerPersona;
+  difficulty: InterviewDifficulty;
 };
 
 type ChatAction =
@@ -128,7 +136,10 @@ const defaultSetup: SetupForm = {
   sessionType: "quick_practice",
   interviewMode: "behavioural",
   rubricPreset: "behavioral",
-  interviewPlan: getDefaultInterviewPlan("quick_practice")
+  interviewPlan: getDefaultInterviewPlan("quick_practice"),
+  useCrossSessionMemory: false,
+  interviewerPersona: "realistic",
+  difficulty: "standard"
 };
 
 const SESSION_TYPE_LABELS: Record<SessionType, string> = {
@@ -146,6 +157,18 @@ const INTERVIEW_MODE_LABELS: Record<InterviewMode, string> = {
   company_motivation: "Company Motivation",
   weakness_gap: "Weakness / Gap",
   final_simulation: "Final Simulation"
+};
+
+const INTERVIEWER_PERSONA_LABELS: Record<InterviewerPersona, string> = {
+  supportive: "Supportive Coach",
+  realistic: "Realistic Interviewer",
+  strict: "Strict Senior Interviewer"
+};
+
+const DIFFICULTY_LABELS: Record<InterviewDifficulty, string> = {
+  standard: "Standard",
+  challenging: "Challenging",
+  senior: "Senior-level"
 };
 
 const LEVEL_SUGGESTIONS = [
@@ -267,6 +290,11 @@ function createLocalAccount(input: { email: string; name: string }) {
     name: input.name.trim()
   };
 
+  storeLocalAccount(account);
+  return account;
+}
+
+function storeLocalAccount(account: LocalAccount) {
   localStorage.setItem(accountStorageKey, JSON.stringify(account));
   return account;
 }
@@ -684,6 +712,7 @@ function MarkdownMessage({ content }: { content: string }) {
 export function App() {
   const [theme, setTheme] = useState<"dark" | "light">(getInitialTheme);
   const [account, setAccount] = useState<LocalAccount | null>(getStoredAccount);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -737,10 +766,6 @@ export function App() {
     const isTechnical =
       activeSession.interviewMode === "technical" ||
       activeSession.sessionType === "technical_screen";
-    const isCompany =
-      activeSession.interviewMode === "company_motivation" ||
-      activeSession.sessionType === "company_specific";
-    const isDeepDive = activeSession.interviewMode === "project_deep_dive";
     const actions: GuidedAction[] = [
       {
         action: planComplete
@@ -751,12 +776,12 @@ export function App() {
         label: planComplete
           ? "Generate final report"
           : hasAssistantQuestion
-            ? "Next guided question"
+            ? "Continue"
             : "Start interview",
         detail: planComplete
           ? "The structured interview plan is complete."
           : hasAssistantQuestion
-            ? "Move to the next stage-aware interview question."
+            ? "Resume with the current planned question if needed."
             : "Begin with the first question in the interview plan.",
         icon: planComplete ? (
           <ClipboardCheck size={17} aria-hidden="true" />
@@ -766,37 +791,6 @@ export function App() {
         primary: true
       }
     ];
-
-    if (!planComplete && isTechnical) {
-      actions.push({
-        action: "technical_question",
-        label: "Technical drill",
-        detail: "Scenario-based question with tradeoffs and edge cases.",
-        icon: <TerminalSquare size={17} aria-hidden="true" />
-      });
-    } else if (!planComplete && isCompany && hasTailoring) {
-      actions.push({
-        action: "tailored_question",
-        label: "Company-tailored question",
-        detail: "Use the company, CV, and job description context.",
-        icon: <FileText size={17} aria-hidden="true" />
-      });
-    } else if (!planComplete && isDeepDive) {
-      actions.push({
-        action: "tailored_question",
-        label: "Project deep-dive",
-        detail: "Probe decisions, tradeoffs, outcomes, and lessons.",
-        icon: <FileText size={17} aria-hidden="true" />,
-        disabled: !hasTailoring
-      });
-    } else if (!planComplete && hasTailoring) {
-      actions.push({
-        action: "tailored_question",
-        label: "Tailored question",
-        detail: "Pull from the CV or job description.",
-        icon: <FileText size={17} aria-hidden="true" />
-      });
-    }
 
     if (hasAnswer) {
       actions.push(
@@ -827,7 +821,6 @@ export function App() {
   }, [
     activeSession,
     hasAssistantQuestion,
-    hasTailoring,
     lastUserMessage
   ]);
   const timerClass =
@@ -837,6 +830,40 @@ export function App() {
         ? "responseTimer warn"
         : "responseTimer";
   const clientId = account?.id ?? "";
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function syncAccessUser() {
+      try {
+        const result = await getCurrentUser(getClientId());
+        if (isCancelled) {
+          return;
+        }
+
+        if (result.user.authenticated) {
+          const nextAccount = storeLocalAccount({
+            id: result.user.id,
+            email: result.user.email ?? "access-user@example.com",
+            name: result.user.name ?? result.user.email ?? "Access user"
+          });
+          setAccount(nextAccount);
+        }
+      } catch {
+        // In development mode, the app can still use the local browser profile screen.
+      } finally {
+        if (!isCancelled) {
+          setIsCheckingAuth(false);
+        }
+      }
+    }
+
+    void syncAccessUser();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!account) {
@@ -986,11 +1013,14 @@ export function App() {
       cvText: session.cvText,
       jobDescription: session.jobDescription,
       companyName: session.companyName,
-        sessionType: session.sessionType,
-        interviewMode: session.interviewMode,
-        rubricPreset: session.rubricPreset,
-        interviewPlan: session.interviewPlan
-      });
+      sessionType: session.sessionType,
+      interviewMode: session.interviewMode,
+      rubricPreset: session.rubricPreset,
+      interviewPlan: session.interviewPlan,
+      useCrossSessionMemory: session.useCrossSessionMemory,
+      interviewerPersona: session.interviewerPersona,
+      difficulty: session.difficulty
+    });
   }
 
   async function handleUpdateSession(event: FormEvent<HTMLFormElement>) {
@@ -1016,7 +1046,10 @@ export function App() {
         sessionType: editSetup.sessionType,
         interviewMode: editSetup.interviewMode,
         rubricPreset: editSetup.rubricPreset,
-        interviewPlan: editSetup.interviewPlan
+        interviewPlan: editSetup.interviewPlan,
+        useCrossSessionMemory: editSetup.useCrossSessionMemory,
+        interviewerPersona: editSetup.interviewerPersona,
+        difficulty: editSetup.difficulty
       });
       setEditingSessionId(null);
       await refreshSessions(editingSessionId);
@@ -1057,10 +1090,17 @@ export function App() {
         setEditSetup((current) => ({ ...current, cvText: clippedText }));
       }
 
+      const metadata = [
+        `${result.characterCount.toLocaleString()} readable characters`,
+        result.pageCount ? `${result.pageCount} PDF pages` : "",
+        ...(result.warnings ?? [])
+      ]
+        .filter(Boolean)
+        .join(". ");
       setStatus(
         result.text.length > 8000
           ? `Loaded ${result.fileName}. Trimmed to the first 8,000 characters.`
-          : `Loaded ${result.fileName}. ${result.characterCount.toLocaleString()} readable characters.`
+          : `Loaded ${result.fileName}. ${metadata}.`
       );
     } catch (caught) {
       const message =
@@ -1103,6 +1143,20 @@ export function App() {
   async function handleSend(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await sendContent(draft.trim(), "message");
+  }
+
+  function updateActiveSessionProgress(interviewProgress?: InterviewProgress) {
+    if (!interviewProgress || !activeSessionId) {
+      return;
+    }
+
+    setSessions((current) =>
+      current.map((session) =>
+        session.id === activeSessionId
+          ? { ...session, interviewProgress }
+          : session
+      )
+    );
   }
 
   async function sendContent(content: string, action: ChatAction) {
@@ -1180,6 +1234,7 @@ export function App() {
       if (action === "generate_report") {
         await refreshReports(activeSessionId);
       }
+      updateActiveSessionProgress(result.interviewProgress);
       void refreshSessions(activeSessionId);
     } catch (caught) {
       setMessages((current) =>
@@ -1287,6 +1342,28 @@ export function App() {
     setActiveReportId(null);
     setActiveSessionId(null);
     setError(null);
+  }
+
+  if (isCheckingAuth && !account) {
+    return (
+      <main className="signInShell">
+        <section className="signInPanel" aria-label="Checking sign in">
+          <div className="brand signInBrand">
+            <div className="brandMark">
+              <Bot size={24} aria-hidden="true" />
+            </div>
+            <div>
+              <p>Cloudflare AI</p>
+              <h1>Interview Coach</h1>
+            </div>
+          </div>
+          <div className="emptyState">
+            <Loader2 className="spin" size={24} />
+            <p>Checking Cloudflare Access...</p>
+          </div>
+        </section>
+      </main>
+    );
   }
 
   if (!account) {
@@ -1464,6 +1541,70 @@ export function App() {
                 </option>
               ))}
             </select>
+          </label>
+
+          <label>
+            <span>
+              <Bot size={16} aria-hidden="true" />
+              Interviewer persona
+            </span>
+            <select
+              value={setup.interviewerPersona}
+              onChange={(event) =>
+                setSetup((current) => ({
+                  ...current,
+                  interviewerPersona: event.target.value as InterviewerPersona
+                }))
+              }
+            >
+              {(Object.entries(INTERVIEWER_PERSONA_LABELS) as [
+                InterviewerPersona,
+                string
+              ][]).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span>
+              <Target size={16} aria-hidden="true" />
+              Difficulty
+            </span>
+            <select
+              value={setup.difficulty}
+              onChange={(event) =>
+                setSetup((current) => ({
+                  ...current,
+                  difficulty: event.target.value as InterviewDifficulty
+                }))
+              }
+            >
+              {(Object.entries(DIFFICULTY_LABELS) as [
+                InterviewDifficulty,
+                string
+              ][]).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="checkboxField">
+            <input
+              type="checkbox"
+              checked={setup.useCrossSessionMemory}
+              onChange={(event) =>
+                setSetup((current) => ({
+                  ...current,
+                  useCrossSessionMemory: event.target.checked
+                }))
+              }
+            />
+            <span>Use memory from previous sessions</span>
           </label>
 
           <button
@@ -1685,6 +1826,57 @@ export function App() {
                       </option>
                     ))}
                   </select>
+                  <select
+                    aria-label="Interviewer persona"
+                    value={editSetup.interviewerPersona}
+                    onChange={(event) =>
+                      setEditSetup((current) => ({
+                        ...current,
+                        interviewerPersona: event.target.value as InterviewerPersona
+                      }))
+                    }
+                  >
+                    {(Object.entries(INTERVIEWER_PERSONA_LABELS) as [
+                      InterviewerPersona,
+                      string
+                    ][]).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label="Difficulty"
+                    value={editSetup.difficulty}
+                    onChange={(event) =>
+                      setEditSetup((current) => ({
+                        ...current,
+                        difficulty: event.target.value as InterviewDifficulty
+                      }))
+                    }
+                  >
+                    {(Object.entries(DIFFICULTY_LABELS) as [
+                      InterviewDifficulty,
+                      string
+                    ][]).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <label className="checkboxField compact">
+                    <input
+                      type="checkbox"
+                      checked={editSetup.useCrossSessionMemory}
+                      onChange={(event) =>
+                        setEditSetup((current) => ({
+                          ...current,
+                          useCrossSessionMemory: event.target.checked
+                        }))
+                      }
+                    />
+                    <span>Use memory from previous sessions</span>
+                  </label>
                   <input
                     aria-label="Company name"
                     value={editSetup.companyName}
@@ -1850,14 +2042,14 @@ export function App() {
               <Bot size={34} />
               <h3>
                 {activeSession
-                  ? "Send your first answer or ask for a practice question."
+                  ? "Start the structured interview, then answer each question."
                   : "Welcome back. Set up your next practice session."}
               </h3>
               <p>
                 {activeSession
                   ? hasTailoring
-                    ? "CV and job description loaded. Use Tailored question for personalised questions."
-                    : "The coach will keep memory and adapt feedback as the interview develops."
+                    ? "CV and job description loaded. The interviewer will use them as the planned stages progress."
+                    : "The interviewer will handle the next question after each answer and keep the timeline in sync."
                   : "Your sessions are saved to this browser profile. Choose a role, pick an interview mode, and add a CV or job description when you want tailored questions."}
               </p>
               {!activeSession && (
@@ -1995,7 +2187,7 @@ export function App() {
             onChange={(event) => setDraft(event.target.value)}
             placeholder={
               activeSession
-                ? "Type your answer or ask for the next question..."
+                ? "Type your answer to the current interview question..."
                 : "Create a session first..."
             }
             disabled={!activeSession || isSending}

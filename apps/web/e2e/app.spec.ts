@@ -43,8 +43,18 @@ test.beforeEach(async ({ page }) => {
     interviewMode: "behavioural",
     rubricPreset: "behavioral",
     interviewPlan: quickPracticePlan,
-    interviewProgress: initialProgress
+    interviewProgress: initialProgress,
+    useCrossSessionMemory: false,
+    interviewerPersona: "realistic",
+    difficulty: "standard"
   };
+  const messages: Array<{
+    id: number;
+    sessionId: string;
+    role: "user" | "assistant";
+    content: string;
+    createdAt: string;
+  }> = [];
 
   await page.route("**/api/me?**", async (route) => {
     await route.fulfill({
@@ -54,10 +64,10 @@ test.beforeEach(async ({ page }) => {
           id: "access:test@example.com",
           email: "test@example.com",
           name: "Test User",
-          authenticated: true
+          authenticated: false
         },
-        loginUrl: "/cdn-cgi/access/login",
-        logoutUrl: "/cdn-cgi/access/logout"
+        loginUrl: "/",
+        logoutUrl: "/"
       })
     });
   });
@@ -94,6 +104,9 @@ test.beforeEach(async ({ page }) => {
       interviewMode: string;
       rubricPreset: string;
       interviewPlan: { stages: Array<{ label: string; questionCount: number }> };
+      useCrossSessionMemory: boolean;
+      interviewerPersona: string;
+      difficulty: string;
     };
 
     expect(body.role).toBe("Backend Engineer");
@@ -102,6 +115,9 @@ test.beforeEach(async ({ page }) => {
     expect(body.sessionType).toBe("full_mock");
     expect(body.interviewMode).toBe("technical");
     expect(body.rubricPreset).toBe("technical");
+    expect(body.useCrossSessionMemory).toBe(true);
+    expect(body.interviewerPersona).toBe("strict");
+    expect(body.difficulty).toBe("challenging");
     expect(body.interviewPlan.stages[0]).toMatchObject({
       label: "Opener",
       questionCount: 2
@@ -139,16 +155,71 @@ test.beforeEach(async ({ page }) => {
       body: JSON.stringify({ reports: [] })
     });
   });
-});
-
-test("shows signed-in onboarding and creates a tailored session", async ({ page }) => {
 
   await page.route("**/api/sessions/session-1/messages?**", async (route) => {
     await route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify({ messages: [] })
+      body: JSON.stringify({ messages })
     });
   });
+
+  await page.route("**/api/chat", async (route) => {
+    const body = route.request().postDataJSON() as {
+      action?: string;
+      message?: string;
+    };
+    let reply = "";
+    let interviewProgress = createdPayload.interviewProgress;
+
+    if (body.action === "first_question") {
+      reply = "Tell me about a project where you improved a frontend experience.";
+    } else if (body.message) {
+      messages.push({
+        id: messages.length + 1,
+        sessionId: "session-1",
+        role: "user",
+        content: body.message,
+        createdAt: new Date().toISOString()
+      });
+      interviewProgress = {
+        stageIndex: 0,
+        questionInStage: 1,
+        completed: false
+      };
+      createdPayload = {
+        ...createdPayload,
+        interviewProgress
+      };
+      reply =
+        "Verdict: Good signal. Strongest signal: You gave a concrete impact. Upgrade: Add the metric earlier. Next question: How did you validate the improvement?";
+    } else if (body.action === "scorecard") {
+      reply =
+        "Overall readiness: promising. Strongest signal: clear ownership. Biggest risk: add more metrics.";
+    } else {
+      reply = "Continue with the current planned question.";
+    }
+
+    messages.push({
+      id: messages.length + 1,
+      sessionId: "session-1",
+      role: "assistant",
+      content: reply,
+      createdAt: new Date().toISOString()
+    });
+
+    await route.fulfill({
+      contentType: "text/event-stream",
+      body:
+        `event: delta\ndata: ${JSON.stringify({ text: reply })}\n\n` +
+        `event: done\ndata: ${JSON.stringify({
+          reply,
+          interviewProgress
+        })}\n\n`
+    });
+  });
+});
+
+test("shows signed-in onboarding and creates a tailored session", async ({ page }) => {
 
   await page.addInitScript(() => {
     class MockSpeechRecognition {
@@ -199,6 +270,9 @@ test("shows signed-in onboarding and creates a tailored session", async ({ page 
   await page.locator(".planStageRow input").first().fill("2");
   await page.getByLabel("Interview mode").selectOption("technical");
   await expect(page.getByLabel("Scoring rubric").first()).toHaveValue("technical");
+  await page.getByLabel("Interviewer persona").selectOption("strict");
+  await page.getByLabel("Difficulty").selectOption("challenging");
+  await page.getByLabel("Use memory from previous sessions").check();
 
   await page.getByRole("button", { name: /add cv and job description/i }).click();
   await page
@@ -219,13 +293,13 @@ test("shows signed-in onboarding and creates a tailored session", async ({ page 
   await page.getByRole("button", { name: /new session/i }).click();
 
   await expect(
-    page.getByText("Send your first answer or ask for a practice question.")
+    page.getByText("Start the structured interview, then answer each question.")
   ).toBeVisible();
   await expect(
     page.getByLabel("Interview progress").getByText("Opener")
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: /technical drill/i })).toBeVisible();
-  await expect(page.getByText("Scenario-based question")).toBeVisible();
+  await expect(page.getByRole("button", { name: /start interview/i })).toBeVisible();
+  await expect(page.getByText("Begin with the first question")).toBeVisible();
 
   const voiceBox = await page.getByRole("button", { name: "Start voice input" }).boundingBox();
   const sendBox = await page.getByRole("button", { name: "Send message" }).boundingBox();
@@ -233,4 +307,18 @@ test("shows signed-in onboarding and creates a tailored session", async ({ page 
   expect(voiceBox).not.toBeNull();
   expect(sendBox).not.toBeNull();
   expect(voiceBox!.x + voiceBox!.width).toBeLessThanOrEqual(sendBox!.x);
+
+  await page.getByRole("button", { name: /start interview/i }).click();
+  await expect(page.getByText(/Tell me about a project/)).toBeVisible();
+
+  await page
+    .getByPlaceholder("Type your answer to the current interview question...")
+    .fill("I improved the dashboard by reducing render work and measuring load time.");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByText(/How did you validate the improvement/)).toBeVisible();
+  await expect(page.getByLabel("Interview progress").getByText("Opener")).toBeVisible();
+  await expect(page.getByLabel("Interview progress").getByText("2/2")).toBeVisible();
+
+  await page.getByRole("button", { name: /technical score/i }).click();
+  await expect(page.getByLabel("Interview progress").getByText("2/2")).toBeVisible();
 });

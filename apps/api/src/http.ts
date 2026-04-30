@@ -6,7 +6,7 @@ export function corsHeaders(request?: Request) {
     "Access-Control-Allow-Credentials": "true",
     "Vary": "Origin",
     "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type"
+    "Access-Control-Allow-Headers": "Content-Type, Cf-Access-Jwt-Assertion"
   };
 }
 

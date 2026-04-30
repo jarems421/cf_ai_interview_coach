@@ -3,6 +3,9 @@ export type ChatRole = "user" | "assistant" | "system";
 export interface Env {
   AI: Ai;
   DB: D1Database;
+  AUTH_MODE?: "access" | "development";
+  ACCESS_TEAM_DOMAIN?: string;
+  ACCESS_AUD?: string;
 }
 
 export interface AuthUser {
@@ -36,6 +39,10 @@ export type RubricPreset =
   | "cybersecurity"
   | "project_defence";
 
+export type InterviewerPersona = "supportive" | "realistic" | "strict";
+
+export type InterviewDifficulty = "standard" | "challenging" | "senior";
+
 export interface Session {
   id: string;
   clientId: string;
@@ -50,6 +57,9 @@ export interface Session {
   rubricPreset: RubricPreset;
   interviewPlan: InterviewPlan;
   interviewProgress: InterviewProgress;
+  useCrossSessionMemory: boolean;
+  interviewerPersona: InterviewerPersona;
+  difficulty: InterviewDifficulty;
   createdAt: string;
   updatedAt: string;
 }
@@ -67,6 +77,15 @@ export interface SessionSummary {
   summary: string;
   strengths: string;
   improvementAreas: string;
+  updatedAt: string;
+}
+
+export interface UserCoachingMemory {
+  userId: string;
+  summary: string;
+  recurringStrengths: string;
+  recurringWeaknesses: string;
+  recommendations: string;
   updatedAt: string;
 }
 

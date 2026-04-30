@@ -1,6 +1,8 @@
-# cf_ai_interview_coach
+# Cloudflare AI Interview Coach
 
 AI Interview Coach is a Cloudflare AI application for practicing interview answers. It uses a chat interface, Workers AI for coaching responses, a Worker API for coordination, and D1 for persistent session memory.
+
+The app runs structured mock interviews: the AI interviewer asks one question at a time, scores or improves answers on request, advances a stage timeline, and produces a final coaching report tailored to the candidate's CV and target role.
 
 ## What It Uses
 
@@ -8,10 +10,11 @@ AI Interview Coach is a Cloudflare AI application for practicing interview answe
 - Coordination: Cloudflare Worker API
 - User input: React chat UI on Cloudflare Pages
 - Memory/state: Cloudflare D1 sessions, messages, and rolling coaching summaries
+- Auth: Cloudflare Access in production, local browser profiles in development
 
-## Why This Fits Cloudflare
+## Why Cloudflare
 
-This project was designed specifically for the Cloudflare AI assignment. It uses Cloudflare Pages for the frontend, Workers for API coordination, Workers AI for LLM inference, and D1 for persistent session memory. I chose this architecture to learn how Cloudflare's developer platform can support full-stack AI applications without relying on external APIs.
+This project uses Cloudflare Pages for the frontend, Workers for API coordination, Workers AI for LLM inference, D1 for persistent session memory, and Cloudflare Access for production authentication. The goal is to show how Cloudflare's developer platform can support a full-stack AI application without relying on an external LLM API.
 
 ## Screenshots
 
@@ -19,31 +22,41 @@ This project was designed specifically for the Cloudflare AI assignment. It uses
 
 ![Session setup screen](docs/screenshots/session-setup.png)
 
-### Dark Mode
+### Structured Interview Timeline
 
-![Dark mode screen](docs/screenshots/dark-mode.png)
+![Structured interview timeline](docs/screenshots/structured-interview.png)
+
+### Final Report
+
+![Final report screen](docs/screenshots/final-report.png)
 
 ## App Flow
 
 1. Choose a target role, level, and interview focus.
 2. Use guided suggestions or upload a resume/CV for more tailored setup.
 3. Start a saved coaching session.
-4. Follow the mode-aware coaching actions or type your own answers.
-5. The Worker stores each turn in D1, sends recent context plus summary memory to Workers AI, stores the reply, and periodically updates coaching memory.
+4. Click **Start interview** once, then answer each interviewer question in the composer.
+5. The Worker stores each turn in D1, asks Workers AI for feedback plus the next planned question, advances the interview timeline, and periodically updates coaching memory.
+6. When the plan completes, generate a final coaching report with CV and job-fit feedback.
 
 ## Features
 
-- Normal in-app sign-in for a browser-backed practice profile.
-- Persistent mock interview sessions per signed-in browser profile.
-- Resume/CV upload for PDF, DOCX, TXT, and Markdown files.
+- Cloudflare Access-backed authentication for deployed use, with browser-backed practice profiles kept only for local development fallback.
+- Persistent mock interview sessions per authenticated Access user or local development profile.
+- Resume/CV upload for PDF, DOCX, TXT, and Markdown files, with parser warnings and clearer corrupt-file errors.
 - Guided autocomplete for role, level, and focus setup fields.
 - Context-aware coaching with recent chat history and rolling D1 memory.
-- Mode-aware coaching actions for first/next questions, technical drills, scorecards, and improving the last answer.
+- Per-session opt-in cross-session coaching memory, disabled by default for privacy.
+- Interviewer persona and difficulty controls for supportive, realistic, strict, standard, challenging, and senior practice.
+- Structured interview plans with stage-aware progress that advances when the AI interviewer asks the next planned question.
+- Adaptive answer handling: vague answers can trigger a coaching pause and retry prompt instead of blindly advancing.
+- Mode-aware scoring tools for rubric scores, scorecards, improving the last answer, and final reports.
 - Stronger scenario-based technical interviewing prompts.
-- End-of-session report generation.
+- Evidence-backed end-of-session reports that cite specific answer patterns from the transcript.
 - Rename and delete saved sessions.
 - Markdown export for a session transcript.
 - Local API tests with mocked D1 and mocked Workers AI.
+- Deterministic AI evaluation harness with generated JSON and Markdown results.
 - Cost-conscious prompts that keep replies compact and update summary memory every few user turns.
 
 ## Local Setup
@@ -58,6 +71,12 @@ Create a local D1 database and apply migrations:
 
 ```bash
 npm run db:local
+```
+
+Create local Worker variables:
+
+```bash
+Copy-Item .dev.vars.example .dev.vars
 ```
 
 Run the Worker API:
@@ -79,7 +98,9 @@ Open `http://localhost:5173`. The Vite dev server proxies `/api` requests to `ht
 ```bash
 npm run typecheck
 npm test
+npm run eval
 npm run build
+npm run test:e2e
 ```
 
 ## Cloudflare Deployment
@@ -104,11 +125,36 @@ Apply the remote migration:
 npm run db:remote
 ```
 
-### Sign-in
+### Authentication
 
-The app has a normal sign-in screen that stores a lightweight browser profile in `localStorage`. Sessions and messages are keyed to that profile id in D1.
+The Worker supports two auth modes:
 
-Do not put an external access gate in front of the public Pages or Worker hostnames for the normal user flow. The frontend talks directly to the Worker API using the app profile id for session ownership.
+- `AUTH_MODE=access`: production mode. The Worker verifies the Cloudflare Access JWT from `Cf-Access-Jwt-Assertion` or the `CF_Authorization` cookie, validates issuer/audience/expiry/signature against Access certs, and derives session ownership from the Access subject.
+- `AUTH_MODE=development`: local fallback. The app uses a browser profile id from `localStorage` so local development does not need Access setup.
+
+For production, configure:
+
+```bash
+npx wrangler secret put AUTH_MODE
+npx wrangler secret put ACCESS_TEAM_DOMAIN
+npx wrangler secret put ACCESS_AUD
+```
+
+Use `access` for `AUTH_MODE`, your Access team domain for `ACCESS_TEAM_DOMAIN`, and the Access application audience tag for `ACCESS_AUD`.
+
+Do not describe the development fallback as secure auth; it is only for local/demo convenience.
+
+Once configured, an authenticated `/api/me` response should include:
+
+```json
+{
+  "user": {
+    "id": "access:...",
+    "email": "user@example.com",
+    "authenticated": true
+  }
+}
+```
 
 Deploy the Worker API:
 
@@ -127,22 +173,33 @@ If you change the Worker URL, update `apps/web/.env.production` before redeployi
 ## Live Demo
 
 - App: https://cf-ai-interview-coach-bml.pages.dev
-- Worker API health: https://cf-ai-interview-coach-public-api.jarems421.workers.dev/api/health
+- Worker API: https://cf-ai-interview-coach-public-api.jarems421.workers.dev
+
+The Worker API is protected by Cloudflare Access in production. Direct unauthenticated requests may return a Cloudflare `403` before they reach the Worker.
 
 The frontend production build uses `apps/web/.env.production` so deployed Pages requests go to the live Worker API.
 
 ## Project Notes
 
-- The app profile is stored in `localStorage`.
-- The app keeps memory per profile id and session id.
-- No passwords, payments, external access gate, or external LLM APIs are required for v1.
+- In production Access mode, user identity comes from the verified Cloudflare Access token.
+- Access signing keys are fetched from the team domain and cached by the Worker.
+- In development fallback mode, the app keeps memory per browser profile id and session id.
+- Interview progress is stored in D1 and is advanced by the Worker when the interviewer asks the next planned question.
+- No app-managed passwords, payments, or external LLM APIs are required for v1.
 - Development prompts and AI prompt text are documented in `PROMPTS.md`.
+
+## Repository Hygiene
+
+- Do not commit `.dev.vars`, `.env`, Wrangler state, build output, Playwright reports, or logs.
+- Use `.dev.vars.example` and `.env.example` for safe local setup hints.
+- Generated evaluation outputs live in `docs/evaluation/` and are safe to commit as evidence.
+- Screenshots used by the README live in `docs/screenshots/`.
+- Security expectations are documented in `SECURITY.md`.
 
 ## Future Improvements
 
-- Add shareable session links behind lightweight authentication.
-- Add rubric presets for behavioral, system design, coding, and leadership interviews.
-- Store final reports separately from chat messages.
+- Add shareable session links with Access-aware permissions.
+- Add more real-world resume fixtures from anonymized PDFs and DOCX files.
 
 ## Useful Cloudflare Docs
 

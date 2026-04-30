@@ -22,6 +22,10 @@ export type RubricPreset =
   | "cybersecurity"
   | "project_defence";
 
+export type InterviewerPersona = "supportive" | "realistic" | "strict";
+
+export type InterviewDifficulty = "standard" | "challenging" | "senior";
+
 export interface Session {
   id: string;
   clientId: string;
@@ -36,6 +40,9 @@ export interface Session {
   rubricPreset: RubricPreset;
   interviewPlan: InterviewPlan;
   interviewProgress: InterviewProgress;
+  useCrossSessionMemory: boolean;
+  interviewerPersona: InterviewerPersona;
+  difficulty: InterviewDifficulty;
   createdAt: string;
   updatedAt: string;
 }
@@ -85,6 +92,8 @@ export interface ResumeExtractResult {
   fileType: string;
   characterCount: number;
   quality: "good" | "warning";
+  warnings?: string[];
+  pageCount?: number;
 }
 
 export interface SessionReport {

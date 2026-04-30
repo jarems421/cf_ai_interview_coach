@@ -1,0 +1,6 @@
+AUTH_MODE=development
+
+# Production values are set as Worker secrets/variables, not committed here.
+# AUTH_MODE=access
+# ACCESS_TEAM_DOMAIN=https://your-team.cloudflareaccess.com
+# ACCESS_AUD=your-access-application-audience

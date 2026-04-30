@@ -1,7 +1,10 @@
 import type {
   AuthState,
+  InterviewDifficulty,
   InterviewMode,
   InterviewPlan,
+  InterviewProgress,
+  InterviewerPersona,
   Message,
   ResumeExtractResult,
   RubricPreset,
@@ -11,6 +14,12 @@ import type {
 } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+
+type ChatResponse = {
+  reply: string;
+  reportId?: string | null;
+  interviewProgress?: InterviewProgress;
+};
 
 function isHtmlResponse(contentType: string | null, body: string) {
   const trimmed = body.trim().toLowerCase();
@@ -100,6 +109,9 @@ export async function createSession(input: {
   interviewMode?: InterviewMode;
   rubricPreset?: RubricPreset;
   interviewPlan?: InterviewPlan;
+  useCrossSessionMemory?: boolean;
+  interviewerPersona?: InterviewerPersona;
+  difficulty?: InterviewDifficulty;
 }) {
   return requestJson<{ sessionId: string }>(`${API_BASE}/api/sessions`, {
     method: "POST",
@@ -137,6 +149,9 @@ export async function updateSession(input: {
   interviewMode?: InterviewMode;
   rubricPreset?: RubricPreset;
   interviewPlan?: InterviewPlan;
+  useCrossSessionMemory?: boolean;
+  interviewerPersona?: InterviewerPersona;
+  difficulty?: InterviewDifficulty;
 }) {
   return requestJson<{ ok: true }>(
     `${API_BASE}/api/sessions/${input.sessionId}`,
@@ -213,7 +228,7 @@ export async function sendChatMessage(input: {
     | "improve_answer"
     | "generate_report";
 }) {
-  return requestJson<{ reply: string; reportId?: string | null }>(`${API_BASE}/api/chat`, {
+  return requestJson<ChatResponse>(`${API_BASE}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
@@ -263,7 +278,7 @@ export async function streamChatMessage(
 
   const contentType = response.headers.get("Content-Type");
   if (!response.ok || !contentType?.includes("text/event-stream")) {
-    const result = await parseResponse<{ reply: string }>(response);
+    const result = await parseResponse<ChatResponse>(response);
     onDelta(result.reply);
     return result;
   }
@@ -277,6 +292,7 @@ export async function streamChatMessage(
   let buffer = "";
   let reply = "";
   let doneReply = "";
+  let doneProgress: InterviewProgress | undefined;
   let streamError = "";
 
   function consumeEvent(eventText: string) {
@@ -297,13 +313,16 @@ export async function streamChatMessage(
       return;
     }
 
-    const parsed = JSON.parse(data) as Partial<{ text: string; reply: string; error: string }>;
+    const parsed = JSON.parse(data) as Partial<
+      ChatResponse & { text: string; error: string }
+    >;
 
     if (eventName === "delta" && typeof parsed.text === "string") {
       reply += parsed.text;
       onDelta(parsed.text);
     } else if (eventName === "done" && typeof parsed.reply === "string") {
       doneReply = parsed.reply;
+      doneProgress = parsed.interviewProgress;
     } else if (eventName === "error") {
       streamError = parsed.error ?? "Could not stream the coaching reply.";
     }
@@ -335,5 +354,10 @@ export async function streamChatMessage(
     throw new Error(streamError);
   }
 
-  return { reply: doneReply || reply };
+  const result: ChatResponse = { reply: doneReply || reply };
+  if (doneProgress) {
+    result.interviewProgress = doneProgress;
+  }
+
+  return result;
 }

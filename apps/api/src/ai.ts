@@ -1,5 +1,10 @@
-import { buildSessionContext, buildSummaryPrompt, COACH_SYSTEM_PROMPT } from "./prompts";
-import type { Message, Session, SessionSummary } from "./types";
+import {
+  buildSessionContext,
+  buildSummaryPrompt,
+  buildUserMemoryPrompt,
+  COACH_SYSTEM_PROMPT
+} from "./prompts";
+import type { Message, Session, SessionSummary, UserCoachingMemory } from "./types";
 
 const MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
@@ -42,6 +47,7 @@ export async function generateCoachReply(input: {
   ai: Ai;
   session: Session;
   summary?: SessionSummary | null;
+  userMemory?: UserCoachingMemory | null;
   messages: Message[];
   instruction?: string;
   maxTokens?: number;
@@ -59,6 +65,7 @@ export async function generateCoachReply(input: {
 export function buildCoachAiInput(input: {
   session: Session;
   summary?: SessionSummary | null;
+  userMemory?: UserCoachingMemory | null;
   messages: Message[];
   instruction?: string;
   maxTokens?: number;
@@ -76,9 +83,14 @@ export function buildCoachAiInput(input: {
         companyName: input.session.companyName,
         sessionType: input.session.sessionType,
         interviewMode: input.session.interviewMode,
+        interviewerPersona: input.session.interviewerPersona,
+        difficulty: input.session.difficulty,
         summary: input.summary?.summary,
         strengths: input.summary?.strengths,
-        improvementAreas: input.summary?.improvementAreas
+        improvementAreas: input.summary?.improvementAreas,
+        userMemory: input.session.useCrossSessionMemory
+          ? input.userMemory
+          : null
       })
     },
     ...input.messages
@@ -103,6 +115,7 @@ export async function generateCoachReplyStream(input: {
   ai: Ai;
   session: Session;
   summary?: SessionSummary | null;
+  userMemory?: UserCoachingMemory | null;
   messages: Message[];
   instruction?: string;
   maxTokens?: number;
@@ -246,6 +259,58 @@ export async function generateUpdatedSummary(input: {
     strengths: typeof parsed.strengths === "string" ? parsed.strengths : "",
     improvementAreas:
       typeof parsed.improvementAreas === "string" ? parsed.improvementAreas : ""
+  };
+}
+
+export async function generateUpdatedUserMemory(input: {
+  ai: Ai;
+  current?: UserCoachingMemory | null;
+  messages: Message[];
+}) {
+  const transcript = input.messages
+    .map((message) => `${message.role.toUpperCase()}: ${message.content}`)
+    .join("\n\n");
+
+  const result = await input.ai.run(MODEL, {
+    messages: [
+      {
+        role: "system",
+        content:
+          "You maintain durable cross-session coaching memory for an interview preparation app. Output valid JSON only."
+      },
+      {
+        role: "user",
+        content: buildUserMemoryPrompt({
+          current: input.current,
+          transcript
+        })
+      }
+    ],
+    max_tokens: 280,
+    temperature: 0.2,
+    response_format: { type: "json_object" }
+  });
+
+  const text = extractAiText(result);
+  const parsed = JSON.parse(text) as Partial<{
+    summary: string;
+    recurringStrengths: string;
+    recurringWeaknesses: string;
+    recommendations: string;
+  }>;
+
+  return {
+    summary: typeof parsed.summary === "string" ? parsed.summary : "",
+    recurringStrengths:
+      typeof parsed.recurringStrengths === "string"
+        ? parsed.recurringStrengths
+        : "",
+    recurringWeaknesses:
+      typeof parsed.recurringWeaknesses === "string"
+        ? parsed.recurringWeaknesses
+        : "",
+    recommendations:
+      typeof parsed.recommendations === "string" ? parsed.recommendations : ""
   };
 }
 

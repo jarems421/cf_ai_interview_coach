@@ -1,4 +1,10 @@
-import type { InterviewMode, SessionType } from "./types";
+import type {
+  InterviewDifficulty,
+  InterviewMode,
+  InterviewerPersona,
+  SessionType,
+  UserCoachingMemory
+} from "./types";
 
 export const COACH_SYSTEM_PROMPT = `You are an AI interview coach for a job candidate.
 
@@ -12,6 +18,8 @@ Rules:
   2. Strongest signal: the best evidence they gave.
   3. Upgrade: the highest-impact fix, ideally with example wording.
   4. Next question: one realistic follow-up question.
+- The structured interview plan decides when to move on. When a stage-aware instruction is provided, follow that stage and ask exactly one next planned question unless told the interview is complete.
+- If an answer is vague, generic, or missing evidence, pause the interview and ask the candidate to retry or deepen the answer before moving on.
 - For technical answers, judge correctness directly: name missing constraints, edge cases, tradeoffs, failure modes, or implementation details before moving on.
 - Adapt to the target role, level, focus area, and prior answers.
 - Calibrate difficulty to the level. Senior and staff candidates should get ambiguity, tradeoffs, leadership, and impact questions.
@@ -49,6 +57,24 @@ const INTERVIEW_MODE_INSTRUCTIONS: Record<InterviewMode, string> = {
     "Simulate a full final-round interview: mix behavioural, technical, and culture-fit questions. Maintain a realistic interviewer tone throughout."
 };
 
+const PERSONA_INSTRUCTIONS: Record<InterviewerPersona, string> = {
+  supportive:
+    "Interviewer persona: supportive coach. Be warm and confidence-building, but still ask for evidence and specificity.",
+  realistic:
+    "Interviewer persona: realistic interviewer. Balance encouragement with direct assessment and practical follow-up pressure.",
+  strict:
+    "Interviewer persona: strict senior interviewer. Challenge vague claims, missing ownership, weak metrics, and shallow tradeoffs directly."
+};
+
+const DIFFICULTY_INSTRUCTIONS: Record<InterviewDifficulty, string> = {
+  standard:
+    "Difficulty: standard. Keep questions realistic for the stated level and focus on clear improvement.",
+  challenging:
+    "Difficulty: challenging. Probe deeper after each claim and expect concrete evidence, tradeoffs, and constraints.",
+  senior:
+    "Difficulty: senior. Emphasize ambiguity, leadership judgment, system impact, risk management, and strategic tradeoffs."
+};
+
 export function buildSessionContext(input: {
   role: string;
   level: string;
@@ -58,14 +84,23 @@ export function buildSessionContext(input: {
   companyName?: string;
   sessionType?: SessionType;
   interviewMode?: InterviewMode;
+  interviewerPersona?: InterviewerPersona;
+  difficulty?: InterviewDifficulty;
   summary?: string;
   strengths?: string;
   improvementAreas?: string;
+  userMemory?: UserCoachingMemory | null;
 }) {
   const memory = [
     input.summary && `Session summary: ${input.summary}`,
     input.strengths && `Observed strengths: ${input.strengths}`,
-    input.improvementAreas && `Improvement areas: ${input.improvementAreas}`
+    input.improvementAreas && `Improvement areas: ${input.improvementAreas}`,
+    input.userMemory &&
+      `Cross-session memory:
+Summary: ${input.userMemory.summary || "No cross-session summary yet."}
+Recurring strengths: ${input.userMemory.recurringStrengths || "None recorded yet."}
+Recurring weaknesses: ${input.userMemory.recurringWeaknesses || "None recorded yet."}
+Recommendations: ${input.userMemory.recommendations || "None recorded yet."}`
   ]
     .filter(Boolean)
     .join("\n");
@@ -75,6 +110,9 @@ export function buildSessionContext(input: {
     input.sessionType && SESSION_TYPE_CONTEXT[input.sessionType],
     input.interviewMode &&
       `Interview mode: ${INTERVIEW_MODE_INSTRUCTIONS[input.interviewMode]}`,
+    input.interviewerPersona &&
+      PERSONA_INSTRUCTIONS[input.interviewerPersona],
+    input.difficulty && DIFFICULTY_INSTRUCTIONS[input.difficulty],
     input.cvText && `Candidate CV:\n${input.cvText}`,
     input.jobDescription && `Job description:\n${input.jobDescription}`
   ]
@@ -104,4 +142,25 @@ Keep each field under 180 characters.
 
 Transcript:
 ${transcript}`;
+}
+
+export function buildUserMemoryPrompt(input: {
+  current?: UserCoachingMemory | null;
+  transcript: string;
+}) {
+  return `Update long-term coaching memory across this candidate's opted-in interview sessions.
+
+Return only valid JSON with these string fields:
+- summary
+- recurringStrengths
+- recurringWeaknesses
+- recommendations
+
+Keep each field under 220 characters. Preserve durable patterns across sessions, not one-off details. If evidence is thin, say so briefly.
+
+Current cross-session memory:
+${input.current ? JSON.stringify(input.current) : "No cross-session memory yet."}
+
+Latest opted-in transcript:
+${input.transcript}`;
 }

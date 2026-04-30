@@ -1,11 +1,14 @@
 import type {
   ChatRole,
+  InterviewDifficulty,
   InterviewMode,
+  InterviewerPersona,
   Message,
   Session,
   SessionReport,
   SessionSummary,
-  SessionType
+  SessionType,
+  UserCoachingMemory
 } from "./types";
 import {
   getDefaultInterviewPlan,
@@ -29,6 +32,9 @@ type SessionRow = {
   rubricPreset: string;
   interviewPlan: string;
   interviewProgress: string;
+  useCrossSessionMemory?: number;
+  interviewerPersona?: string;
+  difficulty?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -59,12 +65,29 @@ type SummaryRow = {
   updatedAt: string;
 };
 
+type UserMemoryRow = {
+  userId: string;
+  summary: string;
+  recurringStrengths: string;
+  recurringWeaknesses: string;
+  recommendations: string;
+  updatedAt: string;
+};
+
 function parseJson(value: string) {
   try {
     return value ? (JSON.parse(value) as unknown) : null;
   } catch {
     return null;
   }
+}
+
+function normalizePersona(value: unknown): InterviewerPersona {
+  return value === "supportive" || value === "strict" ? value : "realistic";
+}
+
+function normalizeDifficulty(value: unknown): InterviewDifficulty {
+  return value === "challenging" || value === "senior" ? value : "standard";
 }
 
 function mapSessionRow(row: SessionRow): Session {
@@ -86,7 +109,10 @@ function mapSessionRow(row: SessionRow): Session {
     interviewProgress: normalizeInterviewProgress(
       parseJson(row.interviewProgress),
       interviewPlan
-    )
+    ),
+    useCrossSessionMemory: row.useCrossSessionMemory === 1,
+    interviewerPersona: normalizePersona(row.interviewerPersona),
+    difficulty: normalizeDifficulty(row.difficulty)
   };
 }
 
@@ -143,6 +169,9 @@ export async function createSession(
     | "interviewMode"
     | "rubricPreset"
     | "interviewPlan"
+    | "useCrossSessionMemory"
+    | "interviewerPersona"
+    | "difficulty"
   >
 ) {
   const id = crypto.randomUUID();
@@ -152,8 +181,8 @@ export async function createSession(
       `INSERT INTO sessions
         (id, client_id, user_id, role, level, focus, cv_text, job_description,
          company_name, session_type, interview_mode, rubric_preset, interview_plan,
-         interview_progress)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         interview_progress, use_cross_session_memory, interviewer_persona, difficulty)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       id,
@@ -169,7 +198,10 @@ export async function createSession(
       input.interviewMode,
       input.rubricPreset,
       serializePlan(input),
-      serializeProgress()
+      serializeProgress(),
+      input.useCrossSessionMemory ? 1 : 0,
+      normalizePersona(input.interviewerPersona),
+      normalizeDifficulty(input.difficulty)
     )
     .run();
 
@@ -199,6 +231,9 @@ export async function updateSession(
     | "interviewMode"
     | "rubricPreset"
     | "interviewPlan"
+    | "useCrossSessionMemory"
+    | "interviewerPersona"
+    | "difficulty"
   >
 ) {
   await db
@@ -214,6 +249,9 @@ export async function updateSession(
            interview_mode = ?,
            rubric_preset = ?,
            interview_plan = ?,
+           use_cross_session_memory = ?,
+           interviewer_persona = ?,
+           difficulty = ?,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`
     )
@@ -228,6 +266,9 @@ export async function updateSession(
       input.interviewMode,
       input.rubricPreset,
       serializePlan(input),
+      input.useCrossSessionMemory ? 1 : 0,
+      normalizePersona(input.interviewerPersona),
+      normalizeDifficulty(input.difficulty),
       sessionId
     )
     .run();
@@ -246,6 +287,9 @@ export async function listSessions(db: D1Database, clientId: string) {
               interview_mode AS interviewMode,
               rubric_preset AS rubricPreset,
               interview_plan AS interviewPlan, interview_progress AS interviewProgress,
+              use_cross_session_memory AS useCrossSessionMemory,
+              interviewer_persona AS interviewerPersona,
+              difficulty,
               created_at AS createdAt, updated_at AS updatedAt
        FROM sessions
        WHERE client_id = ?
@@ -266,6 +310,9 @@ export async function getSession(db: D1Database, sessionId: string) {
               interview_mode AS interviewMode,
               rubric_preset AS rubricPreset,
               interview_plan AS interviewPlan, interview_progress AS interviewProgress,
+              use_cross_session_memory AS useCrossSessionMemory,
+              interviewer_persona AS interviewerPersona,
+              difficulty,
               created_at AS createdAt, updated_at AS updatedAt
        FROM sessions
        WHERE id = ?`
@@ -457,3 +504,54 @@ export async function upsertSummary(
     )
     .run();
 }
+
+export async function getUserCoachingMemory(db: D1Database, userId: string) {
+  return await db
+    .prepare(
+      `SELECT user_id AS userId, summary, recurring_strengths AS recurringStrengths,
+              recurring_weaknesses AS recurringWeaknesses, recommendations,
+              updated_at AS updatedAt
+       FROM user_coaching_memory
+       WHERE user_id = ?`
+    )
+    .bind(userId)
+    .first<UserMemoryRow>();
+}
+
+export async function upsertUserCoachingMemory(
+  db: D1Database,
+  memory: Pick<
+    UserCoachingMemory,
+    | "userId"
+    | "summary"
+    | "recurringStrengths"
+    | "recurringWeaknesses"
+    | "recommendations"
+  >
+) {
+  await db
+    .prepare(
+      `INSERT INTO user_coaching_memory
+        (user_id, summary, recurring_strengths, recurring_weaknesses, recommendations, updated_at)
+       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(user_id) DO UPDATE SET
+        summary = excluded.summary,
+        recurring_strengths = excluded.recurring_strengths,
+        recurring_weaknesses = excluded.recurring_weaknesses,
+        recommendations = excluded.recommendations,
+        updated_at = CURRENT_TIMESTAMP`
+    )
+    .bind(
+      memory.userId,
+      memory.summary,
+      memory.recurringStrengths,
+      memory.recurringWeaknesses,
+      memory.recommendations
+    )
+    .run();
+}
+
+export const dbTestExports = {
+  normalizeDifficulty,
+  normalizePersona
+};
