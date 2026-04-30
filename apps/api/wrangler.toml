@@ -1,4 +1,4 @@
-name = "cf-ai-interview-coach-public-api"
+name = "cf-ai-interview-coach-api"
 main = "src/index.ts"
 compatibility_date = "2026-04-26"
 
