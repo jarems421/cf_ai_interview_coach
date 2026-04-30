@@ -1,8 +1,12 @@
 # Cloudflare AI Interview Coach
 
-AI Interview Coach is a Cloudflare AI application for practicing interview answers. It uses a chat interface, Workers AI for coaching responses, a Worker API for coordination, and D1 for persistent session memory.
+AI Interview Coach is a Cloudflare AI application for practicing interview
+answers. It uses a chat interface, Workers AI for coaching responses, a Worker
+API for coordination, and D1 for persistent session memory.
 
-The app runs structured mock interviews: the AI interviewer asks one question at a time, scores or improves answers on request, advances a stage timeline, and produces a final coaching report tailored to the candidate's CV and target role.
+The app runs structured mock interviews: the AI interviewer asks one question at
+a time, scores or improves answers on request, advances a stage timeline, and
+produces a final coaching report tailored to the candidate's CV and target role.
 
 ## What It Uses
 
@@ -14,7 +18,12 @@ The app runs structured mock interviews: the AI interviewer asks one question at
 
 ## Why Cloudflare
 
-This project uses Cloudflare Pages for the frontend, Workers for API coordination, Workers AI for LLM inference, D1 for persistent session memory, and Cloudflare Access for production authentication. The goal is to show how Cloudflare's developer platform can support a full-stack AI application without relying on an external LLM API.
+This project uses Cloudflare Pages for the frontend, Workers for API
+coordination, Workers AI for LLM inference, D1 for persistent session memory,
+and Cloudflare Access for production authentication.
+
+The goal is to show how Cloudflare's developer platform can support a
+full-stack AI application without relying on an external LLM API.
 
 ## Screenshots
 
@@ -36,19 +45,24 @@ This project uses Cloudflare Pages for the frontend, Workers for API coordinatio
 2. Use guided suggestions or upload a resume/CV for more tailored setup.
 3. Start a saved coaching session.
 4. Click **Start interview** once, then answer each interviewer question in the composer.
-5. The Worker stores each turn in D1, asks Workers AI for feedback plus the next planned question, advances the interview timeline, and periodically updates coaching memory.
+5. The Worker stores each turn in D1, asks Workers AI for feedback plus the next
+   planned question, advances the interview timeline, and periodically updates
+   coaching memory.
 6. When the plan completes, generate a final coaching report with CV and job-fit feedback.
 
 ## Features
 
-- Cloudflare Access-backed authentication for deployed use, with browser-backed practice profiles kept only for local development fallback.
+- Cloudflare Access-backed authentication for deployed use, with browser-backed
+  practice profiles kept only for local development fallback.
 - Persistent mock interview sessions per authenticated Access user or local development profile.
 - Resume/CV upload for PDF, DOCX, TXT, and Markdown files, with parser warnings and clearer corrupt-file errors.
 - Guided autocomplete for role, level, and focus setup fields.
 - Context-aware coaching with recent chat history and rolling D1 memory.
 - Per-session opt-in cross-session coaching memory, disabled by default for privacy.
-- Interviewer persona and difficulty controls for supportive, realistic, strict, standard, challenging, and senior practice.
-- Structured interview plans with stage-aware progress that advances when the AI interviewer asks the next planned question.
+- Interviewer persona and difficulty controls for supportive, realistic,
+  strict, standard, challenging, and senior practice.
+- Structured interview plans with stage-aware progress that advances when the AI
+  interviewer asks the next planned question.
 - Adaptive answer handling: vague answers can trigger a coaching pause and retry prompt instead of blindly advancing.
 - Mode-aware scoring tools with rubric presets, rubric scores, scorecards, improving the last answer, and final reports.
 - Stronger scenario-based technical interviewing prompts.
@@ -56,7 +70,8 @@ This project uses Cloudflare Pages for the frontend, Workers for API coordinatio
 - Rename and delete saved sessions.
 - Markdown export for a session transcript.
 - Local API tests with mocked D1 and mocked Workers AI.
-- Deterministic evaluation harness for interview-flow, rubric, report, memory, and feedback-output checks, with optional live API evaluation support.
+- Deterministic evaluation harness for interview-flow, rubric, report, memory,
+  and feedback-output checks, with optional live API evaluation support.
 - Cost-conscious prompts that keep replies compact and update summary memory every few user turns.
 
 ## Local Setup
@@ -103,7 +118,10 @@ npm run build
 npm run test:e2e
 ```
 
-These commands are backed by package scripts in `package.json`; `npm run eval` writes the generated deterministic evidence files in `docs/evaluation/`. `npm run eval:live` can call a configured live API when the required environment values are present.
+These commands are backed by package scripts in `package.json`. `npm run eval`
+writes the generated deterministic evidence files in `docs/evaluation/`.
+`npm run eval:live` can call a configured live API when the required
+environment values are present.
 
 ## Cloudflare Deployment
 
@@ -121,7 +139,9 @@ npx wrangler d1 create interview_coach
 
 Copy the returned `database_id` into the root `wrangler.toml`.
 
-The root `wrangler.toml` and `apps/api/wrangler.toml` should use the same Worker name. This repo currently uses `cf-ai-interview-coach-public-api` in both files so local API commands and root deploys target the same Worker.
+The root `wrangler.toml` and `apps/api/wrangler.toml` should use the same
+Worker name. This repo currently uses `cf-ai-interview-coach-public-api` in
+both files so local API commands and root deploys target the same Worker.
 
 Apply the remote migration:
 
@@ -133,8 +153,12 @@ npm run db:remote
 
 The Worker supports two auth modes:
 
-- `AUTH_MODE=access`: production mode. The Worker verifies the Cloudflare Access JWT from `Cf-Access-Jwt-Assertion` or the `CF_Authorization` cookie, validates issuer/audience/expiry/signature against Access certs, and derives session ownership from the Access subject.
-- `AUTH_MODE=development`: local fallback. The app uses a browser profile id from `localStorage` so local development does not need Access setup.
+- `AUTH_MODE=access`: production mode. The Worker verifies the Cloudflare
+  Access JWT from `Cf-Access-Jwt-Assertion` or the `CF_Authorization` cookie,
+  validates issuer/audience/expiry/signature against Access certs, and derives
+  session ownership from the Access subject.
+- `AUTH_MODE=development`: local fallback. The app uses a browser profile id
+  from `localStorage` so local development does not need Access setup.
 
 For production, configure:
 
@@ -144,7 +168,8 @@ npx wrangler secret put ACCESS_TEAM_DOMAIN
 npx wrangler secret put ACCESS_AUD
 ```
 
-Use `access` for `AUTH_MODE`, your Access team domain for `ACCESS_TEAM_DOMAIN`, and the Access application audience tag for `ACCESS_AUD`.
+Use `access` for `AUTH_MODE`, your Access team domain for
+`ACCESS_TEAM_DOMAIN`, and the Access application audience tag for `ACCESS_AUD`.
 
 Do not describe the development fallback as secure auth; it is only for local/demo convenience.
 
@@ -179,14 +204,18 @@ If you change the Worker URL, update `apps/web/.env.production` before redeployi
 - App: https://cf-ai-interview-coach-bml.pages.dev
 - Worker API: https://cf-ai-interview-coach-public-api.jarems421.workers.dev
 
-The Worker API, including `/api/health`, is protected by Cloudflare Access in production. Direct unauthenticated requests may return a Cloudflare `403` before they reach the Worker.
+The Worker API, including `/api/health`, is protected by Cloudflare Access in
+production. Direct unauthenticated requests may return a Cloudflare `403`
+before they reach the Worker.
 
 The frontend production build uses `apps/web/.env.production` so deployed Pages requests go to the live Worker API.
 
 ## Project Notes
 
 - In production Access mode, user identity comes from the verified Cloudflare Access token.
-- The frontend still creates a browser `clientId` for local/demo fallback and compatibility, but that value is not trusted as production identity when `AUTH_MODE=access`.
+- The frontend still creates a browser `clientId` for local/demo fallback and
+  compatibility, but that value is not trusted as production identity when
+  `AUTH_MODE=access`.
 - Access signing keys are fetched from the team domain and cached by the Worker.
 - In development fallback mode, the app keeps memory per browser profile id and session id.
 - Interview progress is stored in D1 and is advanced by the Worker when the interviewer asks the next planned question.
