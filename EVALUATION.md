@@ -1,6 +1,8 @@
 # Evaluation
 
-This document records evaluation checks for AI Interview Coach: structured interview progression, feedback quality, rubric scoring, CV/job-description tailoring, final reports, and resume extraction robustness.
+This document records evaluation checks for AI Interview Coach: structured
+interview progression, feedback quality, rubric scoring, CV/job-description
+tailoring, final reports, and resume extraction robustness.
 
 Model under test: `@cf/meta/llama-3.3-70b-instruct-fp8-fast`
 
@@ -43,7 +45,9 @@ Latest generated artifacts:
 4. Confirm the assistant gives feedback and asks the next planned question.
 5. Confirm the timeline advances without clicking `Continue`.
 
-**Observed result:** The API now returns `interviewProgress` in normal and streaming chat responses. The frontend applies that progress immediately, so the stage bar moves after the assistant asks the next planned question.
+**Observed result:** The API now returns `interviewProgress` in normal and
+streaming chat responses. The frontend applies that progress immediately, so
+the stage bar moves after the assistant asks the next planned question.
 
 | Step | Expected | Result |
 |------|----------|--------|
@@ -56,9 +60,15 @@ Latest generated artifacts:
 
 **Sample answer:**
 
-> In my last role, I led a backend migration from a monolith to microservices. I coordinated with three engineers, used Kafka for event streaming, and we reduced API latency by 40%. The biggest challenge was managing data consistency during the cutover, so we used dual writes and reconciliation checks for a week.
+> In my last role, I led a backend migration from a monolith to microservices.
+> I coordinated with three engineers, used Kafka for event streaming, and we
+> reduced API latency by 40%. The biggest challenge was managing data
+> consistency during the cutover, so we used dual writes and reconciliation
+> checks for a week.
 
-**Expected rubric behavior:** Strong relevance, specificity, and evidence; technical depth should be good but should ask for more detail on failure modes and rollback.
+**Expected rubric behavior:** Strong relevance, specificity, and evidence.
+Technical depth should be good, while still asking for more detail on failure
+modes and rollback.
 
 | Category | Expected score | Rationale |
 |----------|----------------|-----------|
@@ -84,7 +94,11 @@ Latest generated artifacts:
 
 **Improved answer target:**
 
-> I led a three-person migration of our upload service from synchronous processing to a queue-backed flow. I owned the rollout plan, added dashboards for failure rate and processing time, and coordinated support comms. We reduced timeout-related upload failures by 32% over two releases while keeping rollback available through a feature flag.
+> I led a three-person migration of our upload service from synchronous
+> processing to a queue-backed flow. I owned the rollout plan, added dashboards
+> for failure rate and processing time, and coordinated support comms. We
+> reduced timeout-related upload failures by 32% over two releases while
+> keeping rollback available through a feature flag.
 
 **Why this is better:** It has ownership, scope, mechanism, measurement, and risk handling.
 
@@ -100,13 +114,14 @@ CV snippet:
 
 Job description snippet:
 
-> Build polished frontend experiences, work across product and platform teams, improve reliability and usability, and communicate tradeoffs clearly.
+> Build polished frontend experiences, work across product and platform teams,
+> improve reliability and usability, and communicate tradeoffs clearly.
 
 | Question | Generic output target | Tailored output target |
 |----------|-----------------------|------------------------|
-| Q1 | "Tell me about a frontend project you improved." | "Tell me about the dashboard performance work from your CV and how you validated the user impact." |
-| Q2 | "How do you handle technical tradeoffs?" | "For a Cloudflare frontend surface, how would you balance accessibility, performance, and release risk?" |
-| Q3 | "Describe a time you worked cross-functionally." | "How did you communicate frontend tradeoffs to product or platform partners during the dashboard work?" |
+| Q1 | "Tell me about a frontend project you improved." | Ask about dashboard performance work and user impact. |
+| Q2 | "How do you handle technical tradeoffs?" | Ask how they balance accessibility, performance, and release risk. |
+| Q3 | "Describe a time you worked cross-functionally." | Ask how they explained tradeoffs to partners. |
 
 **Expected result:** Tailored questions should reference concrete CV/JD evidence without simply repeating pasted text.
 
@@ -114,12 +129,12 @@ Job description snippet:
 
 | Variant | Strengths | Weaknesses | Decision |
 |---------|-----------|------------|----------|
-| Generic chat prompt | Natural conversational feedback | Drifted from the interview plan and could ask untracked follow-ups | Rejected for structured flow |
-| Rubric-only prompt | Consistent scoring format | Felt less like a realistic interview | Kept only for scoring actions |
-| Stage-aware answer prompt | Feedback and next question stay aligned with timeline | Needs careful completion handling to avoid extra final questions | Current default |
-| Adaptive retry prompt | Stops vague answers from counting as progress | Heuristic still needs real-user tuning | Current default for weak answers |
-| Persona/difficulty prompt | Makes supportive, realistic, strict, challenging, and senior practice feel different | Needs more live examples across roles | Current default |
-| `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Fast enough for streaming chat and follows compact structure well | Can still be generic if CV/JD context is thin | Current model |
+| Generic chat prompt | Natural feedback | Drifted from the plan | Rejected |
+| Rubric-only prompt | Consistent scoring | Less realistic | Scoring only |
+| Stage-aware answer prompt | Keeps timeline aligned | Needs completion guards | Current default |
+| Adaptive retry prompt | Blocks vague progress | Needs real-user tuning | Current default |
+| Persona/difficulty prompt | Changes pressure level | Needs more live examples | Current default |
+| `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Fast and structured | Generic when context is thin | Current model |
 
 ## 6. Adaptive Coaching And Memory
 
@@ -131,9 +146,10 @@ Automated deterministic scenarios now cover:
 | Strict persona | Feedback directly challenges vague evidence, ownership, and gaps | Pass |
 | Cross-session memory on | Prompt includes recurring coaching memory and recommendations | Pass |
 | Cross-session memory off | Prompt uses only current session context | Pass |
-| Evidence-based report | Final report requires strongest answer, weakest answer, repeated patterns, alignment, and practice plan with evidence | Pass |
+| Evidence-based report | Requires answer evidence, patterns, alignment, and practice plan | Pass |
 
-Cross-session memory is per-session opt-in. Sessions with the toggle disabled do not read or update user-level coaching memory.
+Cross-session memory is per-session opt-in. Sessions with the toggle disabled do
+not read or update user-level coaching memory.
 
 ## 7. Resume Extraction Robustness
 
@@ -177,4 +193,6 @@ npm run dev:api
 npm run dev:web
 ```
 
-Then create paired sessions with and without CV/JD context and compare the generated questions, rubric scores, and final reports against the examples above.
+Then create paired sessions with and without CV/JD context and compare the
+generated questions, rubric scores, and final reports against the examples
+above.
