@@ -782,6 +782,21 @@ button {
   padding: 12px 14px;
   color: var(--danger-text);
   background: var(--danger-bg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.errorRetry {
+  flex: none;
+  border: 1px solid var(--danger-border);
+  border-radius: 6px;
+  padding: 4px 12px;
+  color: inherit;
+  background: transparent;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .transcript {

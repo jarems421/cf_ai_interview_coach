@@ -205,7 +205,20 @@ Deploy the Pages frontend:
 npm run deploy:web
 ```
 
-If you change the Worker URL, update `apps/web/.env.production` before redeploying Pages.
+In production the frontend calls `/api/*` on its own origin. `functions/api/[[path]].ts`
+is a Pages Function that proxies those calls to the Worker, so the browser never
+makes a cross-origin request to an Access-protected `workers.dev` URL (which
+fails with "Could not reach the API").
+
+One-time Pages setup (Pages project -> Settings -> Bindings):
+
+1. Add a **service binding** named `API` pointing at the deployed Worker
+   (or set an `API_ORIGIN` variable to the Worker URL).
+2. If the Pages site and the Worker are separate Access applications, set the
+   Worker's `ACCESS_AUD` secret to both audience tags, comma-separated.
+
+For local development, `VITE_API_BASE_URL` in `.env` still points at
+`wrangler dev`.
 
 ## Live Demo
 
