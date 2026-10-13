@@ -1,5 +1,7 @@
 # Cloudflare AI Interview Coach
 
+## 🚀 [**Live Demo → cf-ai-interview-coach-bml.pages.dev**](https://cf-ai-interview-coach-bml.pages.dev)
+
 AI Interview Coach is a Cloudflare AI application for practicing interview
 answers. It uses a chat interface, Workers AI for coaching responses, a Worker
 API for coordination, and D1 for persistent session memory.
