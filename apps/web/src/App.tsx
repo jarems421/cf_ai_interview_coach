@@ -2029,7 +2029,21 @@ export function App() {
 
         {activeSession && <InterviewTimeline session={activeSession} />}
 
-        {error && <div className="errorBanner">{error}</div>}
+        {error && (
+          <div className="errorBanner" role="alert">
+            <span>{error}</span>
+            <button
+              type="button"
+              className="errorRetry"
+              onClick={() => {
+                setError(null);
+                void refreshSessions();
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        )}
 
         <div className="transcript" ref={transcriptRef}>
           {isLoadingMessages ? (
