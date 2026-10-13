@@ -80,14 +80,17 @@ function normalizeTeamDomain(value: string) {
   return trimmed.startsWith("https://") ? trimmed : `https://${trimmed}`;
 }
 
+// ACCESS_AUD may hold several comma-separated audience tags, e.g. when the
+// Pages app and the Worker are separate Access applications.
 function hasAudience(claimAudience: unknown, expectedAudience: string) {
-  if (typeof claimAudience === "string") {
-    return claimAudience === expectedAudience;
-  }
+  const expected = expectedAudience
+    .split(",")
+    .map((audience) => audience.trim())
+    .filter(Boolean);
+  const claimed = Array.isArray(claimAudience) ? claimAudience : [claimAudience];
 
-  return (
-    Array.isArray(claimAudience) &&
-    claimAudience.some((audience) => audience === expectedAudience)
+  return claimed.some(
+    (audience) => typeof audience === "string" && expected.includes(audience)
   );
 }
 
