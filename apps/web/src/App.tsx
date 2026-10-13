@@ -732,6 +732,9 @@ export function App() {
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showMoreOptions, setShowMoreOptions] = useState(false);
+  const [showSetup, setShowSetup] = useState(true);
+  const hasCollapsedSetup = useRef(false);
   const [resumeUploadStatus, setResumeUploadStatus] = useState<string | null>(null);
   const [editResumeUploadStatus, setEditResumeUploadStatus] = useState<string | null>(
     null
@@ -924,6 +927,10 @@ export function App() {
     try {
       const result = await listSessions(clientId);
       setSessions(result.sessions);
+      if (nextActiveId || (!hasCollapsedSetup.current && result.sessions.length > 0)) {
+        setShowSetup(false);
+      }
+      hasCollapsedSetup.current = true;
 
       const preferredId =
         nextActiveId ??
@@ -1420,6 +1427,17 @@ export function App() {
           </button>
         </div>
 
+        <button
+          className="newSessionToggle"
+          type="button"
+          onClick={() => setShowSetup((current) => !current)}
+          aria-expanded={showSetup}
+        >
+          <Plus size={17} aria-hidden="true" />
+          {showSetup ? "Hide session setup" : "New session"}
+        </button>
+
+        {showSetup && (
         <form className="setupPanel" onSubmit={handleCreateSession}>
           <GuidedInput
             label="Role"
@@ -1483,13 +1501,6 @@ export function App() {
             </select>
           </label>
 
-          <InterviewPlanEditor
-            plan={setup.interviewPlan}
-            onChange={(interviewPlan) =>
-              setSetup((current) => ({ ...current, interviewPlan }))
-            }
-          />
-
           <label>
             <span>
               <ClipboardCheck size={16} aria-hidden="true" />
@@ -1520,6 +1531,25 @@ export function App() {
               )}
             </select>
           </label>
+
+          <button
+            className="advancedToggle"
+            type="button"
+            onClick={() => setShowMoreOptions((current) => !current)}
+            aria-expanded={showMoreOptions}
+          >
+            {showMoreOptions ? <ChevronUp size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}
+            {showMoreOptions ? "Hide" : "Customize"} interview options
+          </button>
+
+          {showMoreOptions && (
+            <>
+          <InterviewPlanEditor
+            plan={setup.interviewPlan}
+            onChange={(interviewPlan) =>
+              setSetup((current) => ({ ...current, interviewPlan }))
+            }
+          />
 
           <label>
             <span>
@@ -1607,6 +1637,9 @@ export function App() {
             <span>Use memory from previous sessions</span>
           </label>
 
+            </>
+          )}
+
           <button
             className="advancedToggle"
             type="button"
@@ -1690,9 +1723,10 @@ export function App() {
 
           <button className="primaryButton" type="submit" disabled={isCreating}>
             {isCreating ? <Loader2 className="spin" size={18} /> : <Plus size={18} />}
-            New session
+            Start session
           </button>
         </form>
+        )}
 
         <div className="sessionListHeader">
           <MessageSquareText size={17} aria-hidden="true" />
@@ -2073,6 +2107,16 @@ export function App() {
                   <span>3. Start practicing</span>
                 </div>
               )}
+              {!activeSession && !showSetup && (
+                <button
+                  className="primaryButton emptyStateAction"
+                  type="button"
+                  onClick={() => setShowSetup(true)}
+                >
+                  <Plus size={18} aria-hidden="true" />
+                  Set up a session
+                </button>
+              )}
             </div>
           ) : (
             messages.map((message) => {
@@ -2202,7 +2246,7 @@ export function App() {
             placeholder={
               activeSession
                 ? "Type your answer to the current interview question..."
-                : "Create a session first..."
+                : "Create or select a session in the sidebar to start answering."
             }
             disabled={!activeSession || isSending}
             rows={3}
