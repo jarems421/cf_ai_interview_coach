@@ -267,6 +267,7 @@ test("shows signed-in onboarding and creates a tailored session", async ({ page 
   await page.getByRole("textbox", { name: "Focus" }).fill("system");
   await page.getByRole("option", { name: "System design and tradeoffs" }).click();
   await page.getByLabel("Session type").selectOption("full_mock");
+  await page.getByRole("button", { name: /customize interview options/i }).click();
   await page.locator(".planStageRow input").first().fill("2");
   await page.getByLabel("Interview mode").selectOption("technical");
   await expect(page.getByLabel("Scoring rubric").first()).toHaveValue("technical");
@@ -290,7 +291,7 @@ test("shows signed-in onboarding and creates a tailored session", async ({ page 
   await page
     .getByPlaceholder("Paste the job description here...")
     .fill("Cloudflare frontend role.");
-  await page.getByRole("button", { name: /new session/i }).click();
+  await page.getByRole("button", { name: /start session/i }).click();
 
   await expect(
     page.getByText("Start the structured interview, then answer each question.")
